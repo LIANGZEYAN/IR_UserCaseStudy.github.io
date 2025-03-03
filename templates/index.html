@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Survey Participation</title>
+  <title>Academic Research Survey</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -60,17 +60,25 @@
 </head>
 <body>
   <div class="container">
-    <h1>Survey Participation</h1>
-    <h2>Terms and Conditions</h2>
-    <p>Please read the following terms and conditions carefully before participating in the survey. By checking the box, you agree to abide by all rules and conditions of this survey.</p>
-    <!-- 下载链接，确保你将 terms.pdf 文件放在 static 目录下 -->
-    <a class="download-link" href="/static/terms.pdf" download>Download Terms and Conditions</a>
+    <h1>Academic Research Survey</h1>
+    <h2>Privacy & Research Information</h2>
+    <p>Thank you for participating in our academic research survey! We will collect your click behavior and page visit duration to better understand user browsing habits. Here are a few key points:</p>
+    <ul style="text-align: left;">
+      <li><strong>Purpose of Data Collection:</strong> All collected data will be used strictly for academic research. No commercial purpose is involved.</li>
+      <li><strong>Data Confidentiality:</strong> Your information will be anonymized, and your personal data will be protected at all times.</li>
+      <li><strong>Voluntary Participation:</strong> Participation is entirely voluntary, and you may withdraw at any time.</li>
+      <li><strong>Transparency:</strong> If you have any questions about the survey or would like more details on our methods and goals, please feel free to contact us.</li>
+    </ul>
+    <p>By checking the box below, you acknowledge that you have read and agree to the above statements. If you prefer a more detailed version, you can download the full terms below.</p>
+    <!-- Make sure you place the terms.pdf in the static directory or an appropriate path -->
+    <a class="download-link" href="/static/terms.pdf" download>Download Full Terms</a>
+
     <form method="post">
       <div>
-        <input type="checkbox" name="terms" value="accepted" required> I have read and agree to the Terms and Conditions.
+        <input type="checkbox" name="terms" value="accepted" required> I have read and agree to the statements above.
       </div>
       <div>
-        <label for="user_id">Enter your User ID:</label>
+        <label for="user_id">Please enter your User ID:</label>
         <input type="text" name="user_id" id="user_id" required>
       </div>
       <div class="error">{{ error or "" }}</div>
