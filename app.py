@@ -108,7 +108,7 @@ def index():
 
 # Query page: query_id indicates which query (total 3 queries)
 @app.route("/query/<int:query_id>", methods=["GET", "POST"])
-def query_page(query_id):
+def query(query_id):
     if "user_id" not in session:
         return redirect(url_for("index"))
     if request.method == "POST":
