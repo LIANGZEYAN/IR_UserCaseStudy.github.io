@@ -3,6 +3,7 @@ import pymysql
 import os
 from datetime import datetime
 import random
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # Must be set for session usage
