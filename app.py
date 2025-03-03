@@ -147,9 +147,9 @@ def init_db():
                 c.executemany(
                     "INSERT INTO queries (id, content) VALUES (%s, %s, %s)",
                     [
-                        (1, "Query 1", "Climate Change Impacts on Agriculture"),
-                        (2, "Query 2", "Renewable Energy Technologies"),
-                        (3, "Query 3", "Advances in Artificial Intelligence")
+                        (1, "Climate Change Impacts on Agriculture"),
+                        (2, "How does climate change affect agriculture?"),
+                        (3, "What are the causes of inflation?")
                     ]
                 )
                 print("Inserted initial queries data")
