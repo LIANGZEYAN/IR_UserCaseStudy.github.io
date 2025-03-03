@@ -115,7 +115,7 @@ def init_db():
                      (27, 3, 39, 'Many people adopt plant-based diets for health and environmental reasons, leading to increased demand for alternative protein sources such as tofu and plant-based meat.')
                 ]
                 insert_sql = """INSERT INTO documents (id, qid, docno, content)
-                                VALUES (%s, %s, %s, %s, %s)"""
+                                VALUES (%s, %s, %s, %s)"""
                 c.executemany(insert_sql, docs_insert)
                 print("Inserted initial documents data")
 
@@ -145,7 +145,7 @@ def init_db():
 
                 # 插入3条查询
                 c.executemany(
-                    "INSERT INTO queries (id, content) VALUES (%s, %s, %s)",
+                    "INSERT INTO queries (id, content) VALUES (%s, %s)",
                     [
                         (1, "Climate Change Impacts on Agriculture"),
                         (2, "What are the benefits of regular exercise?"),
