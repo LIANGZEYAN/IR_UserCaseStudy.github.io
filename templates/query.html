@@ -143,7 +143,6 @@
     <div class="grid-container">
       {% for doc in docs %}
         <div class="grid-item" data-docid="{{ doc.id }}" data-docno="{{ doc.docno }}" data-fulltext="{{ doc.content|e }}" onclick="openEnlargeModal(this)">
-          <h3>{{ doc.title }}</h3>
           <p class="doc-content">{{ doc.content }}</p>
         </div>
       {% endfor %}
