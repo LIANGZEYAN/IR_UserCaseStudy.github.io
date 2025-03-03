@@ -79,7 +79,6 @@ def init_db():
                         id INT PRIMARY KEY,
                         qid INT,
                         docno INT,
-                        title TEXT,
                         content TEXT
                     )
                 ''')
@@ -115,7 +114,7 @@ def init_db():
                      (26, 3, 38, 'Document 8', 'This is the content of Document 8 for Query 3.'),
                      (27, 3, 39, 'Document 9', 'This is the content of Document 9 for Query 3.')
                 ]
-                insert_sql = """INSERT INTO documents (id, qid, docno, title, content)
+                insert_sql = """INSERT INTO documents (id, qid, docno, content)
                                 VALUES (%s, %s, %s, %s, %s)"""
                 c.executemany(insert_sql, docs_insert)
                 print("Inserted initial documents data")
@@ -139,7 +138,6 @@ def init_db():
                 c.execute('''
                     CREATE TABLE queries (
                         id INT PRIMARY KEY,
-                        title VARCHAR(255),
                         content TEXT
                     )
                 ''')
@@ -147,7 +145,7 @@ def init_db():
 
                 # 插入3条查询
                 c.executemany(
-                    "INSERT INTO queries (id, title, content) VALUES (%s, %s, %s)",
+                    "INSERT INTO queries (id, content) VALUES (%s, %s, %s)",
                     [
                         (1, "Query 1", "Climate Change Impacts on Agriculture"),
                         (2, "Query 2", "Renewable Energy Technologies"),
@@ -234,7 +232,7 @@ def query_page(query_id):
             # 根据 doc_order 获取文档详情
             if doc_order:
                 placeholders = ",".join(["%s"] * len(doc_order))
-                sql = f"SELECT id, title, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
+                sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
                 params = [query_id] + doc_order
                 c.execute(sql, params)
                 rows = c.fetchall()
