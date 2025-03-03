@@ -10,11 +10,11 @@ app.secret_key = "your_secret_key"  # Must be set for session usage
 # 1) 建立 MySQL 连接函数，从环境变量读取连接信息
 def get_connection():
     return pymysql.connect(
-        host=os.environ["MYSQLHOST"],
-        user=os.environ["MYSQLUSER"],
-        password=os.environ["MYSQLPASSWORD"],
-        db=os.environ["MYSQLDATABASE"],
-        port=int(os.environ["MYSQLPORT"]),       # 若Railway未提供端口,可默认为3306
+        host=os.environ["MYSQL_HOST"],
+        port=int(os.environ["MYSQL_PORT"]),
+        user=os.environ["MYSQL_USER"],
+        password=os.environ["MYSQL_PASSWORD"],
+        db=os.environ["MYSQL_DATABASE"],
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
