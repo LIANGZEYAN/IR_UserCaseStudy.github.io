@@ -1,1 +1,2 @@
-pip install flask
+Flask==2.2.3
+gunicorn==20.1.0
