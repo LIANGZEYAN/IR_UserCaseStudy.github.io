@@ -56,7 +56,7 @@ def init_db():
     conn = get_connection()
     try:
         with conn.cursor() as c:
-            # --- logs 表 ---
+            # --- 1) logs 表 ---
             c.execute("SHOW TABLES LIKE 'logs'")
             if not c.fetchone():
                 c.execute('''
@@ -71,9 +71,10 @@ def init_db():
                 ''')
                 print("Created table: logs")
 
-            # --- documents 表 ---
+            # --- 2) documents 表 ---
             c.execute("SHOW TABLES LIKE 'documents'")
             if not c.fetchone():
+                # 如果 documents 表不存在，则创建
                 c.execute('''
                     CREATE TABLE documents (
                         id INT PRIMARY KEY,
@@ -84,42 +85,50 @@ def init_db():
                 ''')
                 print("Created table: documents")
 
-                # 仅示例插入部分文档，请按需补全
+            # 无论表是否新建，都可先检查行数
+            c.execute("SELECT COUNT(*) AS cnt FROM documents")
+            doc_count = c.fetchone()["cnt"]
+            # 如果 documents 里是空的，就插入示例数据
+            if doc_count == 0:
                 docs_insert = [
-                     (1, 1, 11, 'Higher average temperatures can speed up crop growth cycles, sometimes reducing yields and affecting crop quality.'),
-                     (2, 1, 12, 'More frequent droughts, floods, and heatwaves threaten harvests and raise economic risks for farmers worldwide.'),
-                     (3, 1, 13, 'Warmer climates allow pests and pathogens to expand their range, putting additional stress on crops and yields.'),
-                     (4, 1, 14, 'Changes in rainfall patterns and competition for water resources make irrigation more challenging, particularly in arid regions.'),
-                     (5, 1, 15, 'Fluctuating rain intensity and prolonged droughts erode topsoil and reduce soil fertility, requiring careful land management.'),
-                     (6, 1, 16, 'As growing conditions change, farmers may need to adopt heat- or drought-tolerant crops or move to new planting zones.'),
-                     (7, 1, 17, 'Extreme heat affects animal health, feed availability, and grazing land productivity, raising costs for livestock producers.'),
-                     (8, 1, 18, 'Unpredictable harvests can drive up food prices and jeopardize global food supplies, hitting vulnerable populations the hardest.'),
-                     (9, 1, 19, 'Techniques like organic farming, precision irrigation, and conservation tillage help enhance resilience against climate impacts.'),
-                     (10, 2, 21, 'Regular exercise improves cardiovascular health, strengthens muscles, and boosts mental well-being. Studies show that engaging in at least 150 minutes of moderate-intensity exercise per week reduces the risk of chronic diseases like diabetes and hypertension.'),
-                     (11, 2, 22, 'Exercise plays a crucial role in maintaining a healthy weight and enhancing brain function. Physical activity has been linked to improved memory, reduced stress, and a lower likelihood of developing conditions such as depression and anxiety.'),
-                     (12, 2, 23, 'A balanced diet and good sleep are also key factors in maintaining overall health. While exercise is beneficial, it should be combined with proper nutrition and adequate rest for the best results.'),
-                     (13, 2, 24, 'Walking daily can be a simple yet effective form of exercise. Even short walks can improve circulation, aid digestion, and contribute to weight management.'),
-                     (14, 2, 25, 'Many people find it challenging to stick to an exercise routine due to time constraints and lack of motivation. However, setting small, achievable goals and finding an enjoyable activity can make it easier to maintain a consistent habit.'),
-                     (15, 2, 26, 'The human body requires essential nutrients such as vitamins, proteins, and minerals to function properly. While food plays a major role in health, physical activity can complement its benefits.'),
-                     (16, 2, 27, 'Some people prefer indoor workouts like yoga or Pilates, while others enjoy outdoor activities such as hiking or running. The choice of exercise largely depends on personal preference and fitness goals.'),
-                     (17, 2, 28, 'Technological advancements in smartwatches and fitness trackers have made it easier for people to monitor their health and activity levels, encouraging them to stay active.'),
-                     (18, 2, 29, 'Traveling to different countries can provide opportunities to experience new cultures, try different foods, and explore diverse landscapes.'),
-                     (19, 3, 31, 'Inflation is primarily caused by an increase in the money supply, rising production costs, and high consumer demand. When too much money circulates in the economy without a corresponding rise in goods and services, prices go up.'),
-                     (20, 3, 32, 'Cost-push inflation occurs when the costs of raw materials, wages, and production increase, leading businesses to raise prices to maintain profitability. This is often triggered by supply chain disruptions or rising oil prices.'),
-                     (21, 3, 33, 'Demand-pull inflation happens when consumer demand for goods and services exceeds supply. This can be driven by economic growth, low unemployment, or government stimulus measures that increase spending.'),
-                     (22, 3, 34, 'Central banks control inflation by adjusting interest rates. When inflation is high, they raise interest rates to slow down borrowing and spending, helping to stabilize prices.'),
-                     (23, 3, 35, 'Exchange rate fluctuations can influence inflation. A weaker currency makes imported goods more expensive, raising overall prices in the economy.'),
-                     (24, 3, 36, 'Stock market trends can indirectly affect inflation, as investor confidence and asset prices influence spending behaviors, but stock prices themselves do not directly cause inflation.'),
-                     (25, 3, 37, 'Technological advancements can help reduce inflation by improving production efficiency and lowering costs, but their impact varies across industries.'),
-                     (26, 3, 38, 'Space exploration budgets have increased in recent years, with countries investing in new missions to explore Mars and the Moon.'),
-                     (27, 3, 39, 'Many people adopt plant-based diets for health and environmental reasons, leading to increased demand for alternative protein sources such as tofu and plant-based meat.')
+                    (1, 1, 11, 'Higher average temperatures can speed up crop growth cycles, sometimes reducing yields and affecting crop quality.'),
+                    (2, 1, 12, 'More frequent droughts, floods, and heatwaves threaten harvests and raise economic risks for farmers worldwide.'),
+                    (3, 1, 13, 'Warmer climates allow pests and pathogens to expand their range, putting additional stress on crops and yields.'),
+                    (4, 1, 14, 'Changes in rainfall patterns and competition for water resources make irrigation more challenging, particularly in arid regions.'),
+                    (5, 1, 15, 'Fluctuating rain intensity and prolonged droughts erode topsoil and reduce soil fertility, requiring careful land management.'),
+                    (6, 1, 16, 'As growing conditions change, farmers may need to adopt heat- or drought-tolerant crops or move to new planting zones.'),
+                    (7, 1, 17, 'Extreme heat affects animal health, feed availability, and grazing land productivity, raising costs for livestock producers.'),
+                    (8, 1, 18, 'Unpredictable harvests can drive up food prices and jeopardize global food supplies, hitting vulnerable populations the hardest.'),
+                    (9, 1, 19, 'Techniques like organic farming, precision irrigation, and conservation tillage help enhance resilience against climate impacts.'),
+                    (10, 2, 21, 'Regular exercise improves cardiovascular health, strengthens muscles, and boosts mental well-being. Studies show that engaging in at least 150 minutes of moderate-intensity exercise per week reduces the risk of chronic diseases like diabetes and hypertension.'),
+                    (11, 2, 22, 'Exercise plays a crucial role in maintaining a healthy weight and enhancing brain function. Physical activity has been linked to improved memory, reduced stress, and a lower likelihood of developing conditions such as depression and anxiety.'),
+                    (12, 2, 23, 'A balanced diet and good sleep are also key factors in maintaining overall health. While exercise is beneficial, it should be combined with proper nutrition and adequate rest for the best results.'),
+                    (13, 2, 24, 'Walking daily can be a simple yet effective form of exercise. Even short walks can improve circulation, aid digestion, and contribute to weight management.'),
+                    (14, 2, 25, 'Many people find it challenging to stick to an exercise routine due to time constraints and lack of motivation. However, setting small, achievable goals and finding an enjoyable activity can make it easier to maintain a consistent habit.'),
+                    (15, 2, 26, 'The human body requires essential nutrients such as vitamins, proteins, and minerals to function properly. While food plays a major role in health, physical activity can complement its benefits.'),
+                    (16, 2, 27, 'Some people prefer indoor workouts like yoga or Pilates, while others enjoy outdoor activities such as hiking or running. The choice of exercise largely depends on personal preference and fitness goals.'),
+                    (17, 2, 28, 'Technological advancements in smartwatches and fitness trackers have made it easier for people to monitor their health and activity levels, encouraging them to stay active.'),
+                    (18, 2, 29, 'Traveling to different countries can provide opportunities to experience new cultures, try different foods, and explore diverse landscapes.'),
+                    (19, 3, 31, 'Inflation is primarily caused by an increase in the money supply, rising production costs, and high consumer demand. When too much money circulates in the economy without a corresponding rise in goods and services, prices go up.'),
+                    (20, 3, 32, 'Cost-push inflation occurs when the costs of raw materials, wages, and production increase, leading businesses to raise prices to maintain profitability. This is often triggered by supply chain disruptions or rising oil prices.'),
+                    (21, 3, 33, 'Demand-pull inflation happens when consumer demand for goods and services exceeds supply. This can be driven by economic growth, low unemployment, or government stimulus measures that increase spending.'),
+                    (22, 3, 34, 'Central banks control inflation by adjusting interest rates. When inflation is high, they raise interest rates to slow down borrowing and spending, helping to stabilize prices.'),
+                    (23, 3, 35, 'Exchange rate fluctuations can influence inflation. A weaker currency makes imported goods more expensive, raising overall prices in the economy.'),
+                    (24, 3, 36, 'Stock market trends can indirectly affect inflation, as investor confidence and asset prices influence spending behaviors, but stock prices themselves do not directly cause inflation.'),
+                    (25, 3, 37, 'Technological advancements can help reduce inflation by improving production efficiency and lowering costs, but their impact varies across industries.'),
+                    (26, 3, 38, 'Space exploration budgets have increased in recent years, with countries investing in new missions to explore Mars and the Moon.'),
+                    (27, 3, 39, 'Many people adopt plant-based diets for health and environmental reasons, leading to increased demand for alternative protein sources such as tofu and plant-based meat.')
                 ]
-                insert_sql = """INSERT INTO documents (id, qid, docno, content)
-                                VALUES (%s, %s, %s, %s)"""
-                c.executemany(insert_sql, docs_insert)
-                print("Inserted initial documents data")
 
-            # --- orders 表 ---
+                # 注意这里要有4个占位符，对应 (id, qid, docno, content)
+                insert_sql = """
+                    INSERT INTO documents (id, qid, docno, content)
+                    VALUES (%s, %s, %s, %s)
+                """
+                c.executemany(insert_sql, docs_insert)
+                print("Inserted initial documents data into `documents`")
+
+            # --- 3) orders 表 ---
             c.execute("SHOW TABLES LIKE 'orders'")
             if not c.fetchone():
                 c.execute('''
@@ -132,9 +141,10 @@ def init_db():
                 ''')
                 print("Created table: orders")
 
-            # --- queries 表 ---
+            # --- 4) queries 表 ---
             c.execute("SHOW TABLES LIKE 'queries'")
             if not c.fetchone():
+                # 如果 queries 表不存在，则创建
                 c.execute('''
                     CREATE TABLE queries (
                         id INT PRIMARY KEY,
@@ -143,16 +153,20 @@ def init_db():
                 ''')
                 print("Created table: queries")
 
-                # 插入3条查询
-                c.executemany(
-                    "INSERT INTO queries (id, content) VALUES (%s, %s)",
-                    [
-                        (1, "Climate Change Impacts on Agriculture"),
-                        (2, "What are the benefits of regular exercise?"),
-                        (3, "What are the causes of inflation?")
-                    ]
-                )
-                print("Inserted initial queries data")
+            # 无论表是否新建，都可检查其行数
+            c.execute("SELECT COUNT(*) AS cnt FROM queries")
+            q_count = c.fetchone()["cnt"]
+            if q_count == 0:
+                # 插入 3 条查询
+                query_data = [
+                    (1, "Climate Change Impacts on Agriculture"),
+                    (2, "What are the benefits of regular exercise?"),
+                    (3, "What are the causes of inflation?")
+                ]
+                # 对应 2 个列 (id, content)，所以只用 2 个占位符
+                q_insert_sql = "INSERT INTO queries (id, content) VALUES (%s, %s)"
+                c.executemany(q_insert_sql, query_data)
+                print("Inserted initial queries data into `queries`")
 
         conn.commit()
     finally:
@@ -217,14 +231,19 @@ def query_page(query_id):
                 # 第一次 -> 生成 doc_order
                 c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY docno LIMIT 9", (query_id,))
                 raw_doc_ids = [r["id"] for r in c.fetchall()]
+
                 # 计算 row_index
                 row_index = (abs(hash(user_id)) + query_id) % 9
                 # 取拉丁方的一行
                 perm = LATIN_9x9[row_index]  # e.g. [2,5,9,4,1,3,7,8,6]
+
                 # 重排 doc_ids
+                # 这里假设 raw_doc_ids 至少有 9 篇文档，否则会 index out of range
+                # 如果不一定有 9 篇，可以加个判断
                 doc_order = [raw_doc_ids[perm[i] - 1] for i in range(9)]
                 doc_order_str = ",".join(str(x) for x in doc_order)
-                # 存到 orders
+
+                # 存到 orders 表
                 c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
                           (user_id, query_id, doc_order_str))
                 conn.commit()
@@ -236,7 +255,7 @@ def query_page(query_id):
                 params = [query_id] + doc_order
                 c.execute(sql, params)
                 rows = c.fetchall()
-                # 需手动reorder
+                # 需手动按 doc_order 排序
                 doc_map = {r["id"]: r for r in rows}
                 docs = [doc_map[d] for d in doc_order if d in doc_map]
             else:
@@ -280,7 +299,9 @@ def log_event():
         conn.close()
 
     return jsonify({'message': 'Log received'}), 200
+
+# 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
+
 if __name__ == '__main__':
-    # 容器/本地启动时，自动建表并插入初始数据
     app.run(host="0.0.0.0", port=5000)
