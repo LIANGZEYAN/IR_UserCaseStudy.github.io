@@ -95,24 +95,24 @@ def init_db():
                      (7, 1, 17, 'Extreme heat affects animal health, feed availability, and grazing land productivity, raising costs for livestock producers.'),
                      (8, 1, 18, 'Unpredictable harvests can drive up food prices and jeopardize global food supplies, hitting vulnerable populations the hardest.'),
                      (9, 1, 19, 'Techniques like organic farming, precision irrigation, and conservation tillage help enhance resilience against climate impacts.'),
-                     (10, 2, 21, 'This is the content of Document 1 for Query 2.'),
-                     (11, 2, 22, 'This is the content of Document 2 for Query 2.'),
-                     (12, 2, 23, 'This is the content of Document 3 for Query 2.'),
-                     (13, 2, 24, 'This is the content of Document 4 for Query 2.'),
-                     (14, 2, 25, 'This is the content of Document 5 for Query 2.'),
-                     (15, 2, 26, 'This is the content of Document 6 for Query 2.'),
-                     (16, 2, 27, 'This is the content of Document 7 for Query 2.'),
-                     (17, 2, 28, 'This is the content of Document 8 for Query 2.'),
-                     (18, 2, 29, 'This is the content of Document 9 for Query 2.'),
-                     (19, 3, 31, 'This is the content of Document 1 for Query 3.'),
-                     (20, 3, 32, 'This is the content of Document 2 for Query 3.'),
-                     (21, 3, 33, 'This is the content of Document 3 for Query 3.'),
-                     (22, 3, 34, 'This is the content of Document 4 for Query 3.'),
-                     (23, 3, 35, 'This is the content of Document 5 for Query 3.'),
-                     (24, 3, 36, 'This is the content of Document 6 for Query 3.'),
-                     (25, 3, 37, 'This is the content of Document 7 for Query 3.'),
-                     (26, 3, 38, 'This is the content of Document 8 for Query 3.'),
-                     (27, 3, 39, 'This is the content of Document 9 for Query 3.')
+                     (10, 2, 21, 'Regular exercise improves cardiovascular health, strengthens muscles, and boosts mental well-being. Studies show that engaging in at least 150 minutes of moderate-intensity exercise per week reduces the risk of chronic diseases like diabetes and hypertension.'),
+                     (11, 2, 22, 'Exercise plays a crucial role in maintaining a healthy weight and enhancing brain function. Physical activity has been linked to improved memory, reduced stress, and a lower likelihood of developing conditions such as depression and anxiety.'),
+                     (12, 2, 23, 'A balanced diet and good sleep are also key factors in maintaining overall health. While exercise is beneficial, it should be combined with proper nutrition and adequate rest for the best results.'),
+                     (13, 2, 24, 'Walking daily can be a simple yet effective form of exercise. Even short walks can improve circulation, aid digestion, and contribute to weight management.'),
+                     (14, 2, 25, 'Many people find it challenging to stick to an exercise routine due to time constraints and lack of motivation. However, setting small, achievable goals and finding an enjoyable activity can make it easier to maintain a consistent habit.'),
+                     (15, 2, 26, 'The human body requires essential nutrients such as vitamins, proteins, and minerals to function properly. While food plays a major role in health, physical activity can complement its benefits.'),
+                     (16, 2, 27, 'Some people prefer indoor workouts like yoga or Pilates, while others enjoy outdoor activities such as hiking or running. The choice of exercise largely depends on personal preference and fitness goals.'),
+                     (17, 2, 28, 'Technological advancements in smartwatches and fitness trackers have made it easier for people to monitor their health and activity levels, encouraging them to stay active.'),
+                     (18, 2, 29, 'Traveling to different countries can provide opportunities to experience new cultures, try different foods, and explore diverse landscapes.'),
+                     (19, 3, 31, 'Inflation is primarily caused by an increase in the money supply, rising production costs, and high consumer demand. When too much money circulates in the economy without a corresponding rise in goods and services, prices go up.'),
+                     (20, 3, 32, 'Cost-push inflation occurs when the costs of raw materials, wages, and production increase, leading businesses to raise prices to maintain profitability. This is often triggered by supply chain disruptions or rising oil prices.'),
+                     (21, 3, 33, 'Demand-pull inflation happens when consumer demand for goods and services exceeds supply. This can be driven by economic growth, low unemployment, or government stimulus measures that increase spending.'),
+                     (22, 3, 34, 'Central banks control inflation by adjusting interest rates. When inflation is high, they raise interest rates to slow down borrowing and spending, helping to stabilize prices.'),
+                     (23, 3, 35, 'Exchange rate fluctuations can influence inflation. A weaker currency makes imported goods more expensive, raising overall prices in the economy.'),
+                     (24, 3, 36, 'Stock market trends can indirectly affect inflation, as investor confidence and asset prices influence spending behaviors, but stock prices themselves do not directly cause inflation.'),
+                     (25, 3, 37, 'Technological advancements can help reduce inflation by improving production efficiency and lowering costs, but their impact varies across industries.'),
+                     (26, 3, 38, 'Space exploration budgets have increased in recent years, with countries investing in new missions to explore Mars and the Moon.'),
+                     (27, 3, 39, 'Many people adopt plant-based diets for health and environmental reasons, leading to increased demand for alternative protein sources such as tofu and plant-based meat.')
                 ]
                 insert_sql = """INSERT INTO documents (id, qid, docno, content)
                                 VALUES (%s, %s, %s, %s, %s)"""
@@ -148,7 +148,7 @@ def init_db():
                     "INSERT INTO queries (id, content) VALUES (%s, %s, %s)",
                     [
                         (1, "Climate Change Impacts on Agriculture"),
-                        (2, "How does climate change affect agriculture?"),
+                        (2, "What are the benefits of regular exercise?"),
                         (3, "What are the causes of inflation?")
                     ]
                 )
