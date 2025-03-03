@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Survey Query {{ query_id }}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f2f2f2;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      background-color: #fff;
+      padding: 20px 40px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 5px;
+      position: relative;
+    }
+    h1, h2, p {
+      text-align: center;
+      color: #333;
+    }
+    .progress {
+      text-align: center;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-gap: 20px;
+      margin-bottom: 20px;
+    }
+    .grid-item {
+      border: 1px solid #ccc;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #f9f9f9;
+      transition: background-color 0.3s ease;
+      border-radius: 4px;
+    }
+    .grid-item.selected {
+      background-color: #a8d5e2;
+    }
+    .nav-btn, .pause-btn {
+      display: inline-block;
+      margin: 20px 10px 0;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #4CAF50;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    .nav-btn:hover, .pause-btn:hover {
+      background-color: #45a049;
+    }
+    /* Pause 按钮置于右上角 */
+    .pause-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+    /* 模态框样式 */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 2000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0, 0, 0, 0.5);
+    }
+    .modal-content {
+      background-color: #fff;
+      margin: 10% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 90%;
+      max-width: 600px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    .modal-content input[type="range"] {
+      width: 100%;
+      margin-top: 20px;
+    }
+    .modal-content input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .modal-content button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .modal-content button:hover {
+      background-color: #45a049;
+    }
+    .modal-content label {
+      font-size: 16px;
+      display: block;
+      margin-top: 10px;
+    }
+    /* 放大文档区域，允许文本选取 */
+    #enlargeDoc {
+      border: 1px solid #ccc;
+      padding: 15px;
+      margin-top: 10px;
+      text-align: left;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      user-select: text !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Pause 按钮 -->
+    <button class="pause-btn" onclick="pauseSurvey()">Pause</button>
+    <!-- 进度提示 -->
+    <div class="progress">Progress: Query {{ query_id }} of 3</div>
+    <!-- 查询内容与说明 -->
+    <h2>{{ query_content }}</h2>
+    <p>Task: Please select the document you find most relevant to the query above. To explain your choice, click a document to enlarge it and select the passage that supports your decision.</p>
+    
+    <div class="grid-container">
+      {% for doc in docs %}
+        <div class="grid-item" data-docid="{{ doc.id }}" data-docno="{{ doc.docno }}" data-fulltext="{{ doc.content|e }}" onclick="openEnlargeModal(this)">
+          <h3>{{ doc.title }}</h3>
+          <p class="doc-content">{{ doc.content }}</p>
+        </div>
+      {% endfor %}
+    </div>
+    <!-- 导航按钮 -->
+    <div style="text-align: center;">
+      {% if query_id > 1 %}
+      <button class="nav-btn" onclick="goBack()">Back</button>
+      {% endif %}
+      <button class="nav-btn" onclick="submitQuery()">Next</button>
+    </div>
+  </div>
+
+  <!-- Bot 检测模态框（仅在 Query 1 且未通过时显示） -->
+  {% if query_id == 1 %}
+  <div id="botModal" class="modal">
+    <div class="modal-content">
+      <h2>Bot Verification</h2>
+      <p id="botText"></p>
+      <input type="range" id="botSlider" min="0" max="100" value="0">
+      <label id="sliderValue">0</label>
+      <button id="botVerify">Verify</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 随机注意力检测模态框 -->
+  <div id="attentionModal" class="modal">
+    <div class="modal-content">
+      <h2>Attention Check</h2>
+      <p id="attentionQuestion"></p>
+      <input type="text" id="attentionAnswer" placeholder="Your answer here...">
+      <button id="attentionSubmit">Submit</button>
+    </div>
+  </div>
+
+  <!-- 放大文档及 Passage Selection 模态框 -->
+  <div id="enlargeModal" class="modal">
+    <div class="modal-content">
+      <h2>Document Passage Selection</h2>
+      <div id="enlargeDoc"></div>
+      <p>Select a portion of the text that supports why this document is relevant to the query.</p>
+      <button onclick="submitPassageSelection()">Submit Selection</button>
+      <button onclick="cancelPassageSelection()">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    // 全局建立 docNoMapping 用于存储每个文档的 docno
+    let docNoMapping = {};
+    document.addEventListener("DOMContentLoaded", function(){
+      // 建立映射，并恢复选中状态和高亮内容
+      let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
+      let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
+      document.querySelectorAll(".grid-item").forEach(item => {
+        let docId = item.getAttribute("data-docid");
+        let docno = item.getAttribute("data-docno") || "N/A";
+        docNoMapping[docId] = docno;
+        if(selectedDocs.indexOf(docId) !== -1){
+          item.classList.add("selected");
+          if(passageHighlights[docId]){
+            item.querySelector(".doc-content").innerHTML = passageHighlights[docId];
+          }
+        }
+      });
+    });
+
+    let currentQid = {{ query_id }};
+    let userId = "{{ session['user_id'] }}";
+    let lastEventTime = Date.now();
+
+    // logEvent 函数：记录事件，并附加详细信息（格式：duration:xx, docno:xx, qid:xx）
+    function logEvent(docId, eventType) {
+      let now = Date.now();
+      let duration = now - lastEventTime;
+      lastEventTime = now;
+      let docno = "";
+      if (docId === "PAGE_NAV" || docId === "BOT_DETECTION" || docId === "ATTENTION_CHECK") {
+          docno = "N/A";
+      } else {
+          let gridItem = document.querySelector('.grid-item[data-docid="' + docId + '"]');
+          if (gridItem) {
+              docno = gridItem.getAttribute("data-docno") || "N/A";
+          } else if (docNoMapping[docId]) {
+              docno = docNoMapping[docId];
+          } else {
+              docno = "N/A";
+          }
+      }
+      let details = "duration:" + duration + ", docno:" + docno + ", qid:" + currentQid;
+      let payload = {
+          userId: userId,
+          qid: currentQid,
+          docId: docId,
+          eventType: eventType + " | " + details,
+          duration: duration
+      };
+      fetch('/api/log', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+      })
+      .then(response => response.json())
+      .then(data => console.log(data))
+      .catch(err => console.error(err));
+    }
+
+    // PART 1: Passage Selection & 高亮显示
+    let currentDocId = null;
+    function openEnlargeModal(element) {
+      let docId = element.getAttribute('data-docid');
+      if (element.classList.contains('selected')) {
+        // 如果已选中，则取消选中并清除高亮
+        element.classList.remove('selected');
+        let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
+        selectedDocs = selectedDocs.filter(id => id !== docId);
+        sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
+        let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
+        delete passageHighlights[docId];
+        sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
+        logEvent(docId, 'UNSELECT');
+        // 恢复原始文本显示
+        let originalText = element.getAttribute('data-fulltext');
+        element.querySelector(".doc-content").innerText = originalText;
+      } else {
+        // 未选中，打开模态框进行 Passage Selection
+        currentDocId = docId;
+        let fullText = element.getAttribute('data-fulltext');
+        document.getElementById("enlargeDoc").innerText = fullText;
+        document.getElementById("enlargeModal").style.display = "block";
+      }
+    }
+    function submitPassageSelection() {
+      let fullText = document.getElementById("enlargeDoc").innerText;
+      let selectedText = window.getSelection().toString();
+      if (!selectedText) {
+        alert("Please select a portion of the text before submitting.");
+        return;
+      }
+      let startIndex = fullText.indexOf(selectedText);
+      let endIndex = startIndex + selectedText.length;
+      let eventDetail = "PASSAGE_SELECTION|original:" + fullText + "|selected:" + selectedText + "|start:" + startIndex + "|end:" + endIndex;
+      logEvent(currentDocId, eventDetail);
+      // 标记文档为已选并保存状态
+      let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
+      if (selectedDocs.indexOf(currentDocId) === -1) {
+        selectedDocs.push(currentDocId);
+        sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
+      }
+      // 生成高亮后的文本
+      let highlightedText = fullText.substring(0, startIndex) + "<mark>" + fullText.substring(startIndex, endIndex) + "</mark>" + fullText.substring(endIndex);
+      let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
+      passageHighlights[currentDocId] = highlightedText;
+      sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
+      // 更新页面中该文档的显示
+      let gridItem = document.querySelector('.grid-item[data-docid="' + currentDocId + '"]');
+      if (gridItem) {
+        gridItem.classList.add("selected");
+        gridItem.querySelector(".doc-content").innerHTML = highlightedText;
+      }
+      document.getElementById("enlargeModal").style.display = "none";
+    }
+    function cancelPassageSelection() {
+      document.getElementById("enlargeModal").style.display = "none";
+    }
+
+    // PART 2: Navigation and Pause
+    function navigatePage(target) {
+      logEvent("PAGE_NAV", target === 'next' ? 'NAV_NEXT' : 'NAV_BACK');
+      if (target === 'next') {
+        window.location.href = currentQid < 3 ? "/query/" + (currentQid + 1) : "/thanks";
+      } else {
+        window.location.href = "/query/" + (currentQid - 1);
+      }
+    }
+    function submitQuery() {
+      navigatePage('next');
+    }
+    function goBack() {
+      navigatePage('back');
+    }
+    function pauseSurvey() {
+      logEvent("PAGE_NAV", "NAV_PAUSE");
+      window.location.href = "/pause?query=" + currentQid;
+    }
+
+    // PART 3: Bot Detection (Query 1 only)
+    {% if query_id == 1 %}
+      let botThreshold = Math.floor(Math.random() * 99) + 1;
+      document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
+      if (sessionStorage.getItem("botChecked") === "true") {
+        document.getElementById("botModal").style.display = "none";
+        lastEventTime = Date.now();
+      } else {
+        document.getElementById("botModal").style.display = "block";
+      }
+      let botDetectionStart = Date.now();
+      const botSlider = document.getElementById("botSlider");
+      const sliderValueLabel = document.getElementById("sliderValue");
+      botSlider.addEventListener("input", function(){
+        sliderValueLabel.textContent = botSlider.value;
+      });
+      document.getElementById("botVerify").addEventListener("click", function(){
+        if (parseInt(botSlider.value) >= botThreshold) {
+          let botDetectionDuration = Date.now() - botDetectionStart;
+          logEvent("BOT_DETECTION", "BOT_DURATION: " + botDetectionDuration);
+          sessionStorage.setItem("botChecked", "true");
+          document.getElementById("botModal").style.display = "none";
+          lastEventTime = Date.now();
+        } else {
+          alert("Please slide the slider further (at least to " + botThreshold + ") to verify you are human.");
+        }
+      });
+    {% endif %}
+
+    // PART 4: Random Attention Check Modal
+    const attentionChecks = [
+      { question: "Please answer: What is your favorite color? Please read the following instructions carefully and answer 'Navy'.", correctAnswer: "Navy" },
+      { question: "Attention check: Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
+      { question: "For verification, please type 'Elephant' if you have read these instructions carefully.", correctAnswer: "Elephant" },
+      { question: "What is 2+2? (If you have read all instructions, answer '4'.)", correctAnswer: "4" },
+      { question: "To verify your attention, please answer 'Blue' to the following: What color do you see?", correctAnswer: "Blue" },
+      { question: "Please enter the secret word 'Sunshine' if you are reading this properly.", correctAnswer: "Sunshine" },
+      { question: "Attention: Please type 'Correct' to confirm you have read the instructions.", correctAnswer: "Correct" },
+      { question: "For quality control, please answer with 'Yes, I have read it' if you understand these instructions.", correctAnswer: "Yes, I have read it" },
+      { question: "If you have carefully read all instructions, please type 'Confirmed'.", correctAnswer: "Confirmed" },
+      { question: "Verification: If you are paying attention, please answer 'Verified'.", correctAnswer: "Verified" }
+    ];
+    function showAttentionCheck() {
+      let randomIndex = Math.floor(Math.random() * attentionChecks.length);
+      let selectedCheck = attentionChecks[randomIndex];
+      document.getElementById("attentionQuestion").innerText = selectedCheck.question;
+      document.getElementById("attentionModal").setAttribute("data-question", selectedCheck.question);
+      document.getElementById("attentionModal").setAttribute("data-correct", selectedCheck.correctAnswer);
+      document.getElementById("attentionModal").style.display = "block";
+    }
+    setTimeout(function(){
+      showAttentionCheck();
+    }, 30000);
+    document.getElementById("attentionSubmit").addEventListener("click", function(){
+      let userAnswer = document.getElementById("attentionAnswer").value.trim();
+      let correctAnswer = document.getElementById("attentionModal").getAttribute("data-correct");
+      let questionText = document.getElementById("attentionModal").getAttribute("data-question");
+      if (userAnswer === correctAnswer) {
+        logEvent("ATTENTION_CHECK", "Question: " + questionText + ", Answer: " + userAnswer);
+        document.getElementById("attentionModal").style.display = "none";
+        lastEventTime = Date.now();
+      } else {
+        alert("Your answer is incorrect. Please make sure you read the instructions carefully.");
+        logEvent("ATTENTION_CHECK", "FAILED, Question: " + questionText + ", Answer: " + userAnswer);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Survey Participation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f2f2f2;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background-color: #fff;
+      padding: 40px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 5px;
+    }
+    .download-link {
+      display: block;
+      margin-top: 20px;
+      font-size: 18px;
+      color: #4CAF50;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    .download-link:hover {
+      text-decoration: underline;
+    }
+    form div {
+      margin-bottom: 15px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    input[type="checkbox"] {
+      margin-right: 10px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Survey Participation</h1>
+    <h2>Terms and Conditions</h2>
+    <p>Please read the following terms and conditions carefully before participating in the survey. By checking the box, you agree to abide by all rules and conditions of this survey.</p>
+    <!-- 下载链接，确保你将 terms.pdf 文件放在 static 目录下 -->
+    <a class="download-link" href="/static/terms.pdf" download>Download Terms and Conditions</a>
+    <form method="post">
+      <div>
+        <input type="checkbox" name="terms" value="accepted" required> I have read and agree to the Terms and Conditions.
+      </div>
+      <div>
+        <label for="user_id">Enter your User ID:</label>
+        <input type="text" name="user_id" id="user_id" required>
+      </div>
+      <div class="error">{{ error or "" }}</div>
+      <button type="submit">Submit</button>
+    </form>
+  </div>
+</body>
+</html>
