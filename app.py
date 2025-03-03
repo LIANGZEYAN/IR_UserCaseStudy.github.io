@@ -251,6 +251,7 @@ def log_event():
 
     return jsonify({'message': 'Log received'}), 200
 
+init_db()  # 容器启动/本地启动时自动建表
+
 if __name__ == '__main__':
-    init_db()  # 容器启动/本地启动时自动建表
     app.run(host="0.0.0.0", port=5000)
