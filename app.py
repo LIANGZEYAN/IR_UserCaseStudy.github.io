@@ -9,12 +9,21 @@ app.secret_key = "your_secret_key"  # Must be set for session usage
 
 # 1) 建立 MySQL 连接函数，从环境变量读取连接信息
 def get_connection():
+    url = os.environ["MYSQL_URL"]  # 例如 "mysql://root:xxxx@containers-xxx:3306/railway"
+    parsed = urlparse(url)         # scheme="mysql", netloc="root:xxxx@containers-xxx:3306", path="/railway"
+
+    host = parsed.hostname         # containers-xxx
+    port = parsed.port             # 3306
+    user = parsed.username         # root
+    password = parsed.password     # xxxx
+    db = parsed.path.lstrip('/')   # "railway" (去掉前导 "/")
+
     return pymysql.connect(
-        host=os.environ["MYSQLHOST"],
-        port=int(os.environ["MYSQLPORT"]),
-        user=os.environ["MYSQLUSER"],
-        password=os.environ["MYSQLPASSWORD"],
-        db=os.environ["MYSQL_DATABASE"],
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        db=db,
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
