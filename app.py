@@ -8,16 +8,16 @@ from urllib.parse import urlparse
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # Must be set for session usage
 
-# 1) 建立 MySQL 连接函数，从环境变量读取连接信息
+# 1) 建立 MySQL 连接函数：解析 Railway 提供的 DSN (MYSQL_URL)
 def get_connection():
-    url = os.environ["MYSQL_URL"]  # 例如 "mysql://root:xxxx@containers-xxx:3306/railway"
-    parsed = urlparse(url)         # scheme="mysql", netloc="root:xxxx@containers-xxx:3306", path="/railway"
+    url = os.environ["MYSQL_URL"]  # e.g. "mysql://root:xxxx@containers-xxx:3306/railway"
+    parsed = urlparse(url)
 
-    host = parsed.hostname         # containers-xxx
-    port = parsed.port             # 3306
-    user = parsed.username         # root
-    password = parsed.password     # xxxx
-    db = parsed.path.lstrip('/')   # "railway" (去掉前导 "/")
+    host = parsed.hostname
+    port = parsed.port
+    user = parsed.username
+    password = parsed.password
+    db = parsed.path.lstrip('/')
 
     return pymysql.connect(
         host=host,
@@ -29,44 +29,51 @@ def get_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# 2) 定义查询页面内容
+# 2) 定义每个查询页面对应的查询内容
 QUERY_CONTENTS = {
     1: "Climate Change Impacts on Agriculture",
     2: "Renewable Energy Technologies",
     3: "Advances in Artificial Intelligence"
 }
 
-# 3) 在MySQL里初始化数据表(只在容器启动时执行一次)
+# 3) 初始化数据库：检查表是否存在，若无则创建并插入初始数据
 def init_db():
     conn = get_connection()
     try:
         with conn.cursor() as c:
-            # 创建 logs 表
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id VARCHAR(100) NOT NULL,
-                    doc_id VARCHAR(100),
-                    event_type VARCHAR(255),
-                    duration INT,
-                    timestamp VARCHAR(255)
-                )
-            ''')
-            # 创建 documents 表
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS documents (
-                    id INT PRIMARY KEY,
-                    qid INT,
-                    docno INT,
-                    title TEXT,
-                    content TEXT
-                )
-            ''')
-            # 检查 documents 表是否已有数据
-            c.execute("SELECT COUNT(*) as cnt FROM documents")
+            # === 检查 logs 表是否存在 ===
+            c.execute("SHOW TABLES LIKE 'logs'")
             row = c.fetchone()
-            if row and row["cnt"] == 0:
-                # 插入初始文档数据 (不能用 executescript, 用多次execute或multi statements)
+            if not row:
+                # 如果 logs 表不存在，则创建
+                c.execute('''
+                    CREATE TABLE logs (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id VARCHAR(100) NOT NULL,
+                        doc_id VARCHAR(100),
+                        event_type VARCHAR(255),
+                        duration INT,
+                        timestamp VARCHAR(255)
+                    )
+                ''')
+                print("Created table: logs")
+
+            # === 检查 documents 表是否存在 ===
+            c.execute("SHOW TABLES LIKE 'documents'")
+            row = c.fetchone()
+            if not row:
+                # 如果 documents 表不存在，则创建并插入初始数据
+                c.execute('''
+                    CREATE TABLE documents (
+                        id INT PRIMARY KEY,
+                        qid INT,
+                        docno INT,
+                        title TEXT,
+                        content TEXT
+                    )
+                ''')
+                print("Created table: documents")
+
                 docs_insert = [
                     (1, 1, 11, 'Rising Temperatures and Crop Yields', 'Higher average temperatures can speed up crop growth cycles, sometimes reducing yields and affecting crop quality.'),
                     (2, 1, 12, 'Increased Extreme Weather Events', 'More frequent droughts, floods, and heatwaves threaten harvests and raise economic risks for farmers worldwide.'),
@@ -96,13 +103,18 @@ def init_db():
                     (26, 3, 38, 'Document 8', 'This is the content of Document 8 for Query 3.'),
                     (27, 3, 39, 'Document 9', 'This is the content of Document 9 for Query 3.')
                 ]
-                insert_sql = "INSERT INTO documents (id, qid, docno, title, content) VALUES (%s, %s, %s, %s, %s)"
+                insert_sql = """
+                    INSERT INTO documents (id, qid, docno, title, content)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
                 c.executemany(insert_sql, docs_insert)
+                print("Inserted initial documents data")
+
         conn.commit()
     finally:
         conn.close()
 
-# Index page: Display Terms & Conditions and User ID input
+# 定义每个查询页面对应的内容
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -112,13 +124,12 @@ def index():
             return render_template("index.html", error="Please accept the Terms and Conditions.")
         if not user_id:
             return render_template("index.html", error="Please enter your User ID.")
-        session["user_id"] = user_id  # Save user ID in session
-        return redirect(url_for("query", query_id=1))
+        session["user_id"] = user_id
+        return redirect(url_for("query_page", query_id=1))
     return render_template("index.html")
 
-# Query page: query_id indicates which query (total 3 queries)
 @app.route("/query/<int:query_id>", methods=["GET", "POST"])
-def query(query_id):
+def query_page(query_id):
     if "user_id" not in session:
         return redirect(url_for("index"))
     if request.method == "POST":
@@ -126,28 +137,27 @@ def query(query_id):
             return redirect(url_for("query_page", query_id=query_id + 1))
         else:
             return redirect(url_for("thanks"))
+
     conn = get_connection()
     try:
         with conn.cursor() as c:
-            # 这里 SELECT 了 docno, 以便在模板中使用 data-docno
+            # SELECT 了 docno, 以便在前端 data-docno
             c.execute("SELECT id, title, content, docno FROM documents WHERE qid = %s ORDER BY docno LIMIT 9", (query_id,))
             rows = c.fetchall()
     finally:
         conn.close()
 
     docs = [{"id": row["id"], "title": row["title"], "content": row["content"], "docno": row["docno"]} for row in rows]
-    # Randomize document order for now
+    # Randomize
     random.shuffle(docs)
-    # Get the query content for this qid
     query_content = QUERY_CONTENTS.get(query_id, "")
     return render_template("query.html", query_id=query_id, docs=docs, query_content=query_content)
 
-# Thank-you page
 @app.route("/thanks")
 def thanks():
     return render_template("thanks.html")
 
-# API endpoint: Record click, unclick, and other events
+# API: record click, unclick, etc.
 @app.route("/api/log", methods=["POST"])
 def log_event():
     data = request.get_json()
@@ -157,7 +167,7 @@ def log_event():
     user_id = data.get('userId')
     doc_id = data.get('docId')
     event_type = data.get('eventType')
-    duration = data.get('duration', 0)  # Optionally record duration
+    duration = data.get('duration', 0)
     timestamp = datetime.now().isoformat()
 
     conn = get_connection()
@@ -178,8 +188,10 @@ def log_event():
 def pause():
     return render_template("pause.html")
 
+init_db()
+
 if __name__ == '__main__':
-    # 在容器启动时自动建表并插入数据(若尚未插入)
-    init_db()
-    # 在本地调试可改成 debug=True, port=5000
+    # 在容器/本地启动时自动 init_db()
+    
+    # 在Railway上用gunicorn时，__name__=='__main__'可能不执行；可改在全局调用
     app.run(host="0.0.0.0", port=5000)
