@@ -284,25 +284,30 @@ def log_event():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    user_id = data.get('userId')
-    docno = data.get('docno', 0)
-    event_type = data.get('eventType')
-    duration = data.get('duration', 0)
-    timestamp = datetime.now().isoformat()
+    user_id    = data.get('userId')
+    qid        = data.get('qid', 0)
+    docno      = data.get('docno', 0)
+    event_type = data.get('eventType', "")
+    start_idx  = data.get('startIndex', -1)
+    end_idx    = data.get('endIndex', -1)
+    duration   = data.get('duration', 0)
+    pass_flag  = data.get('passFlag', 0)
+    timestamp  = datetime.now()  # Use datetime.now() for a proper DATETIME value
 
     conn = get_connection()
     try:
         with conn.cursor() as c:
             sql = """
-                INSERT INTO logs (user_id, docno, event_type, duration, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO logs (user_id, qid, docno, event_type, start_idx, end_idx, duration, pass_flag, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            c.execute(sql, (user_id, docno, event_type, duration, timestamp))
+            c.execute(sql, (user_id, qid, docno, event_type, start_idx, end_idx, duration, pass_flag, timestamp))
         conn.commit()
     finally:
         conn.close()
 
     return jsonify({'message': 'Log received'}), 200
+
 
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
