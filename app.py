@@ -285,7 +285,7 @@ def log_event():
         return jsonify({'error': 'No data provided'}), 400
 
     user_id = data.get('userId')
-    docno = data.get('docId')
+    docno = data.get('docno', 0)
     event_type = data.get('eventType')
     duration = data.get('duration', 0)
     timestamp = datetime.now().isoformat()
