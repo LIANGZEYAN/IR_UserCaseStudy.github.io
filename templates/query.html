@@ -142,7 +142,11 @@
     
     <div class="grid-container">
       {% for doc in docs %}
-        <div class="grid-item" data-docid="{{ doc.id }}" data-docno="{{ doc.docno }}" data-fulltext="{{ doc.content|e }}" onclick="openEnlargeModal(this)">
+        <!-- 无 doc_id，仅用 docno -->
+        <div class="grid-item" 
+             data-docno="{{ doc.docno }}"
+             data-fulltext="{{ doc.content|e }}" 
+             onclick="openEnlargeModal(this)">
           <p class="doc-content">{{ doc.content }}</p>
         </div>
       {% endfor %}
@@ -192,187 +196,130 @@
   </div>
 
   <script>
-    // ============ 1) 初始化 ================
-    let currentQid = {{ query_id }};
-    let userId = "{{ session['user_id'] }}";
-    let lastEventTime = Date.now();
+    // 全局变量
+    let userId = "{{ session['user_id'] }}";  // 从后端session拿到
+    let currentQid = {{ query_id }};          // 当前查询ID
+    let lastEventTime = Date.now();           // 用于计算duration
 
-    // 用于存 docno
-    let docNoMapping = {};
-    document.addEventListener("DOMContentLoaded", function(){
-      let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-      let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
-      document.querySelectorAll(".grid-item").forEach(item => {
-        let docId = item.getAttribute("data-docid");
-        let docno = item.getAttribute("data-docno") || "N/A";
-        docNoMapping[docId] = docno;
-        if(selectedDocs.indexOf(docId) !== -1){
-          item.classList.add("selected");
-          if(passageHighlights[docId]){
-            item.querySelector(".doc-content").innerHTML = passageHighlights[docId];
-          }
-        }
-      });
-    });
+    // 只需要 docno, 不需要 doc_id
+    let currentDocno = 0;
 
-    // ============ 2) 通用的 logEvent 函数 ============
-    function logEvent(docId, eventType) {
+    // ---------------------- 通用的 logEvent 函数 ----------------------
+    // 此函数只发送: userId, qid, docno, eventType, startIndex, endIndex, duration, passFlag
+    function logEvent({
+      docno = 0,
+      eventType = "",
+      startIndex = -1,
+      endIndex = -1,
+      passFlag = 0
+    } = {}) {
       let now = Date.now();
       let duration = now - lastEventTime;
       lastEventTime = now;
-      let docno = "";
-      if (["PAGE_NAV","BOT_DETECTION","ATTENTION_CHECK"].includes(docId)) {
-        docno = "N/A";
-      } else {
-        let gridItem = document.querySelector('.grid-item[data-docid="' + docId + '"]');
-        if (gridItem) {
-            docno = gridItem.getAttribute("data-docno") || "N/A";
-        } else if (docNoMapping[docId]) {
-            docno = docNoMapping[docId];
-        } else {
-            docno = "N/A";
-        }
-      }
-      let details = "duration:" + duration + ", docno:" + docno + ", qid:" + currentQid;
+
       let payload = {
-          userId: userId,
-          qid: currentQid,
-          docId: docId,
-          eventType: eventType + " | " + details,
-          duration: duration
+        userId: userId,
+        qid: currentQid,
+        docno: docno,
+        eventType: eventType,   // "OPEN_DOC", "PASSAGE_SELECTION", etc.
+        startIndex: startIndex,
+        endIndex: endIndex,
+        duration: duration,
+        passFlag: passFlag      // 0或1
       };
+
       fetch('/api/log', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload)
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
       })
       .then(response => response.json())
       .then(data => console.log("Log response:", data))
-      .catch(err => console.error(err));
+      .catch(err => console.error("Log error:", err));
     }
 
-    // ============ 3) 选中文档 - 打开弹窗或取消 ============
-    let currentDocId = null;
+    // ---------------------- 打开/取消选文弹窗 ----------------------
     function openEnlargeModal(element) {
-      let docId = element.getAttribute('data-docid');
-      // 已选中 => 取消
+      // 读取 docno
+      const docno = parseInt(element.getAttribute('data-docno'), 10);
+
       if (element.classList.contains('selected')) {
+        // 已选中 => 取消
         element.classList.remove('selected');
-        let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-        selectedDocs = selectedDocs.filter(id => id !== docId);
-        sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
-        let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
-        delete passageHighlights[docId];
-        sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
-        logEvent(docId, 'UNSELECT');
+        // 这里可以有选中文档列表的逻辑(若需要)
+        logEvent({
+          docno: docno,
+          eventType: "UNSELECT"
+        });
         // 恢复原文
         let originalText = element.getAttribute('data-fulltext');
         element.querySelector(".doc-content").innerText = originalText;
       } else {
-        // 未选中 => 打开放大查看
-        currentDocId = docId;
+        // 未选中 => 打开查看
+        currentDocno = docno;
         let fullText = element.getAttribute('data-fulltext');
-        logEvent(docId, 'OPEN_DOC');
+        logEvent({
+          docno: docno,
+          eventType: "OPEN_DOC"
+        });
         document.getElementById("enlargeDoc").innerText = fullText;
         document.getElementById("enlargeModal").style.display = "block";
       }
     }
 
     function cancelPassageSelection() {
-      // 用户取消 => 记录
-      logEvent(currentDocId, 'CANCEL_DOC');
+      // 用户打开了文档，但又没选就关 => CANCEL_DOC
+      logEvent({
+        docno: currentDocno,
+        eventType: "CANCEL_DOC"
+      });
       document.getElementById("enlargeModal").style.display = "none";
     }
 
-    // ============ 4) 提交选文 - 重点在全选问题的处理 ============
+    // ---------------------- 提交选文逻辑 ----------------------
     function submitPassageSelection() {
       let enlargeDocElem = document.getElementById("enlargeDoc");
-      let rawFullText = enlargeDocElem.innerText; // 原文（带换行）
-      let rawSelectedText = window.getSelection().toString(); // 用户选区
+      let rawFullText = enlargeDocElem.innerText;
+      let rawSelectedText = window.getSelection().toString();
 
-      // 如果啥也没选
       if (!rawSelectedText.trim()) {
         alert("Please select a portion of the text before submitting.");
         return;
       }
-
-      // 用函数统一空白
-      let cleanFullText = unifyWhitespace(rawFullText);
-      let cleanSelected = unifyWhitespace(rawSelectedText);
-
-      console.log("=== Debug Info (PassageSelection) ===");
-      console.log("Raw Full Text:", rawFullText);
-      console.log("Raw Selected Text:", rawSelectedText);
-      console.log("Clean Full Text:", cleanFullText);
-      console.log("Clean Selected:", cleanSelected);
-
-      // 找选中内容在“清洗后文本”中的位置
-      let startIndex = cleanFullText.indexOf(cleanSelected);
-      let endIndex;
-
+      let startIndex = rawFullText.indexOf(rawSelectedText);
       if (startIndex === -1) {
-        // 如果没找到 => 有可能用户确实选了整篇，但带各种换行
-        if (cleanSelected === cleanFullText) {
-          // 当作全选
-          startIndex = 0;
-          endIndex = rawFullText.length; 
-        } else {
-          // 否则就提示一下
-          alert("It seems your selected text doesn't match the document text. Try selecting again.");
-          return;
-        }
-      } else {
-        endIndex = startIndex + cleanSelected.length;
+        alert("Could not find the selected text in the doc. Try selecting again.");
+        return;
+      }
+      let endIndex = startIndex + rawSelectedText.length;
+
+      logEvent({
+        docno: currentDocno,
+        eventType: "PASSAGE_SELECTION",
+        startIndex: startIndex,
+        endIndex: endIndex
+      });
+
+      // 选中后高亮/存状态等
+      let item = document.querySelector('.grid-item[data-docno="' + currentDocno + '"]');
+      if (item) {
+        item.classList.add('selected');
+        // 生成带<mark>的高亮文本
+        let highlighted = rawFullText.substring(0, startIndex)
+                         + "<mark>" + rawFullText.substring(startIndex, endIndex) + "</mark>"
+                         + rawFullText.substring(endIndex);
+        item.querySelector(".doc-content").innerHTML = highlighted;
       }
 
-      // 记录日志
-      let eventDetail = "PASSAGE_SELECTION|original:" + rawFullText
-                      + "|selected:" + rawSelectedText
-                      + "|start:" + startIndex
-                      + "|end:" + endIndex;
-      logEvent(currentDocId, eventDetail);
-
-      // 标记为已选
-      let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-      if (selectedDocs.indexOf(currentDocId) === -1) {
-        selectedDocs.push(currentDocId);
-        sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
-      }
-
-      // 用 <mark> 包裹高亮
-      // 注意：我们这里高亮用 rawFullText.substring
-      // 可能与 cleanFullText 不同，但至少在界面显示正常
-      let highlightedText = rawFullText.substring(0, startIndex)
-                          + "<mark>" + rawFullText.substring(startIndex, endIndex) + "</mark>"
-                          + rawFullText.substring(endIndex);
-
-      let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
-      passageHighlights[currentDocId] = highlightedText;
-      sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
-
-      // 更新页面
-      let gridItem = document.querySelector('.grid-item[data-docid="' + currentDocId + '"]');
-      if (gridItem) {
-        gridItem.classList.add("selected");
-        gridItem.querySelector(".doc-content").innerHTML = highlightedText;
-      }
       document.getElementById("enlargeModal").style.display = "none";
     }
 
-    // ============ 5) whitespace normalize 函数 ============
-    function unifyWhitespace(str) {
-      // 1) 去掉 \r
-      // 2) 把多个空白(包含 \n \t 等)合成一个空格
-      // 3) 再 trim() 两端
-      return str
-        .replace(/\r/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    // ============ 6) 导航和暂停 ============
+    // ---------------------- 页面导航 & 暂停 ----------------------
     function navigatePage(target) {
-      logEvent("PAGE_NAV", target === 'next' ? 'NAV_NEXT' : 'NAV_BACK');
+      // 记录事件
+      logEvent({
+        eventType: "PAGE_NAV"
+      });
       if (target === 'next') {
         window.location.href = currentQid < 3 ? "/query/" + (currentQid + 1) : "/thanks";
       } else {
@@ -386,11 +333,13 @@
       navigatePage('back');
     }
     function pauseSurvey() {
-      logEvent("PAGE_NAV", "NAV_PAUSE");
+      logEvent({
+        eventType: "PAGE_NAV"  // 或 "NAV_PAUSE"
+      });
       window.location.href = "/pause?query=" + currentQid;
     }
 
-    // ============ 7) Bot 检测 (仅 Query 1) ============
+    // ---------------------- Bot Detection (仅 Query 1) ----------------------
     {% if query_id == 1 %}
       let botThreshold = Math.floor(Math.random() * 99) + 1;
       document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
@@ -409,7 +358,11 @@
       document.getElementById("botVerify").addEventListener("click", function(){
         if (parseInt(botSlider.value) >= botThreshold) {
           let botDetectionDuration = Date.now() - botDetectionStart;
-          logEvent("BOT_DETECTION", "BOT_DURATION: " + botDetectionDuration);
+          // passFlag=1 表示通过
+          logEvent({
+            eventType: "BOT_DETECTION",
+            passFlag: 1
+          });
           sessionStorage.setItem("botChecked", "true");
           document.getElementById("botModal").style.display = "none";
           lastEventTime = Date.now();
@@ -419,7 +372,7 @@
       });
     {% endif %}
 
-    // ============ 8) 随机注意力检测弹窗 ============
+    // ---------------------- 随机注意力检测 ----------------------
     const attentionChecks = [
       { question: "Please answer: What is your favorite color? Please read the following instructions carefully and answer 'Navy'.", correctAnswer: "Navy" },
       { question: "Attention check: Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
@@ -432,6 +385,7 @@
       { question: "If you have carefully read all instructions, please type 'Confirmed'.", correctAnswer: "Confirmed" },
       { question: "Verification: If you are paying attention, please answer 'Verified'.", correctAnswer: "Verified" }
     ];
+
     function showAttentionCheck() {
       let randomIndex = Math.floor(Math.random() * attentionChecks.length);
       let selectedCheck = attentionChecks[randomIndex];
@@ -440,21 +394,31 @@
       document.getElementById("attentionModal").setAttribute("data-correct", selectedCheck.correctAnswer);
       document.getElementById("attentionModal").style.display = "block";
     }
+
     setTimeout(function(){
       showAttentionCheck();
-    }, 120000);
+    }, 30000);
 
     document.getElementById("attentionSubmit").addEventListener("click", function(){
       let userAnswer = document.getElementById("attentionAnswer").value.trim();
       let correctAnswer = document.getElementById("attentionModal").getAttribute("data-correct");
       let questionText = document.getElementById("attentionModal").getAttribute("data-question");
+
       if (userAnswer === correctAnswer) {
-        logEvent("ATTENTION_CHECK", "Question: " + questionText + ", Answer: " + userAnswer);
+        // passFlag=1 => 通过
+        logEvent({
+          eventType: "ATTENTION_CHECK",
+          passFlag: 1
+        });
         document.getElementById("attentionModal").style.display = "none";
         lastEventTime = Date.now();
       } else {
         alert("Your answer is incorrect. Please make sure you read the instructions carefully.");
-        logEvent("ATTENTION_CHECK", "FAILED, Question: " + questionText + ", Answer: " + userAnswer);
+        // passFlag=0 => 未通过
+        logEvent({
+          eventType: "ATTENTION_CHECK",
+          passFlag: 0
+        });
       }
     });
   </script>
