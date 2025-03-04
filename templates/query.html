@@ -137,7 +137,7 @@
     <!-- 进度提示 -->
     <div class="progress">Progress: Query {{ query_id }} of 3</div>
     <!-- 查询内容与说明 -->
-    <h2>{{ query_content }}</h2>
+    <h2>Query: {{ query_content }}</h2>
     <p>Task: Please select the document you find most relevant to the query above. To explain your choice, click a document to enlarge it and select the passage that supports your decision.</p>
     
     <div class="grid-container">
@@ -183,8 +183,7 @@
   <div id="enlargeModal" class="modal">
     <div class="modal-content">
       <h2>Document Passage Selection</h2>
-      <!-- 在这里增加查询内容显示 -->
-      <h3 id="enlargeQuery"></h3>
+      <h3 id="enlargeQuery">Query: {{ query_content }}</h3>
       <div id="enlargeDoc"></div>
       <p>Select a portion of the text that supports why this document is relevant to the query.</p>
       <button onclick="submitPassageSelection()">Submit Selection</button>
@@ -193,16 +192,13 @@
   </div>
 
   <script>
-    // 我们把 queryContent 取到 JS 中，便于在弹框中显示
-    let queryContent = "{{ query_content }}";
     let currentQid = {{ query_id }};
     let userId = "{{ session['user_id'] }}";
     let lastEventTime = Date.now();
 
-    // 全局建立 docNoMapping，用于存储每个文档的 docno
+    // 全局映射，用于获取 docno
     let docNoMapping = {};
     document.addEventListener("DOMContentLoaded", function(){
-      // 建立映射，并恢复选中状态和高亮内容
       let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
       let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
       document.querySelectorAll(".grid-item").forEach(item => {
@@ -218,7 +214,7 @@
       });
     });
 
-    // logEvent 函数：记录事件，并附加详细信息（格式：duration:xx, docno:xx, qid:xx）
+    // 日志记录函数
     function logEvent(docId, eventType) {
       let now = Date.now();
       let duration = now - lastEventTime;
@@ -254,12 +250,11 @@
       .catch(err => console.error(err));
     }
 
-    // 选中/取消选中文档
     let currentDocId = null;
     function openEnlargeModal(element) {
       let docId = element.getAttribute('data-docid');
       if (element.classList.contains('selected')) {
-        // 如果已选中，则取消选中并清除高亮
+        // 已选中的 => 取消选中
         element.classList.remove('selected');
         let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
         selectedDocs = selectedDocs.filter(id => id !== docId);
@@ -268,47 +263,78 @@
         delete passageHighlights[docId];
         sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
         logEvent(docId, 'UNSELECT');
-        // 恢复原始文本显示
+        // 恢复原文
         let originalText = element.getAttribute('data-fulltext');
         element.querySelector(".doc-content").innerText = originalText;
       } else {
-        // 第一次点击(还未选中)：先打LOG，再打开模态框
+        // 首次选中 => 打开放大模态
         currentDocId = docId;
         let fullText = element.getAttribute('data-fulltext');
-
-        // 记录打开文档事件
-        logEvent(docId, 'OPEN_DOC'); 
-
-        // 在放大框里同时显示 query 内容
-        document.getElementById("enlargeQuery").innerText = queryContent;
+        logEvent(docId, 'OPEN_DOC');
         document.getElementById("enlargeDoc").innerText = fullText;
         document.getElementById("enlargeModal").style.display = "block";
       }
     }
 
     function submitPassageSelection() {
-      let fullText = document.getElementById("enlargeDoc").innerText;
-      let selectedText = window.getSelection().toString();
-      if (!selectedText) {
+      let enlargeDocElem = document.getElementById("enlargeDoc");
+      // 原始文本（可能含换行）
+      let rawFullText = enlargeDocElem.innerText;
+      // 用户选中的文本
+      let rawSelectedText = window.getSelection().toString();
+
+      // 若用户没选中任何字符
+      if (!rawSelectedText.trim()) {
         alert("Please select a portion of the text before submitting.");
         return;
       }
-      let startIndex = fullText.indexOf(selectedText);
-      let endIndex = startIndex + selectedText.length;
-      let eventDetail = "PASSAGE_SELECTION|original:" + fullText + "|selected:" + selectedText + "|start:" + startIndex + "|end:" + endIndex;
+
+      // 去掉首尾空白 => 避免 \n、空格差异导致 indexOf 找不到
+      let cleanFullText = rawFullText.trim();
+      let cleanSelected = rawSelectedText.trim();
+
+      // 在“清洗后”的全文里尝试找选中内容的位置
+      let startIndex = cleanFullText.indexOf(cleanSelected);
+      let endIndex;
+
+      if (startIndex === -1) {
+        // 如果没找到，而用户实际选中了什么，可能是整段文本差了换行
+        // 也可能用户多选了结尾换行；我们可以做一个判定：若选中内容和全文长度一样，就当作全选
+        if (cleanSelected === cleanFullText) {
+          // 即用户选了整篇
+          startIndex = 0;
+          endIndex = rawFullText.length;
+        } else {
+          alert("It seems your selected text doesn't match the document text. Try selecting again.");
+          return;
+        }
+      } else {
+        endIndex = startIndex + cleanSelected.length;
+      }
+
+      // 记录日志
+      let eventDetail = "PASSAGE_SELECTION|original:" + rawFullText
+                      + "|selected:" + rawSelectedText
+                      + "|start:" + startIndex
+                      + "|end:" + endIndex;
       logEvent(currentDocId, eventDetail);
-      // 标记文档为已选并保存状态
+
+      // 标记文档已选，sessionStorage 记录
       let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
       if (selectedDocs.indexOf(currentDocId) === -1) {
         selectedDocs.push(currentDocId);
         sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
       }
-      // 生成高亮后的文本
-      let highlightedText = fullText.substring(0, startIndex) + "<mark>" + fullText.substring(startIndex, endIndex) + "</mark>" + fullText.substring(endIndex);
+
+      // 高亮显示：只在 UI 上简单插入 <mark> ，演示
+      let highlightedText = rawFullText.substring(0, startIndex)
+                          + "<mark>" + rawFullText.substring(startIndex, endIndex) + "</mark>"
+                          + rawFullText.substring(endIndex);
       let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
       passageHighlights[currentDocId] = highlightedText;
       sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
-      // 更新页面中该文档的显示
+
+      // 更新页面
       let gridItem = document.querySelector('.grid-item[data-docid="' + currentDocId + '"]');
       if (gridItem) {
         gridItem.classList.add("selected");
@@ -318,12 +344,12 @@
     }
 
     function cancelPassageSelection() {
-      // 用户打开了文档，但未做选文就关闭 -> 我们记录一个 CANCEL_DOC
+      // 用户打开了文档，但点击“Cancel” => 记录日志
       logEvent(currentDocId, 'CANCEL_DOC');
       document.getElementById("enlargeModal").style.display = "none";
     }
 
-    // 页面导航和暂停
+    // 导航和暂停
     function navigatePage(target) {
       logEvent("PAGE_NAV", target === 'next' ? 'NAV_NEXT' : 'NAV_BACK');
       if (target === 'next') {
@@ -343,7 +369,7 @@
       window.location.href = "/pause?query=" + currentQid;
     }
 
-    // Bot Detection (仅在 Query 1)
+    // Bot检测 (仅 Query 1)
     {% if query_id == 1 %}
       let botThreshold = Math.floor(Math.random() * 99) + 1;
       document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
@@ -372,7 +398,7 @@
       });
     {% endif %}
 
-    // 随机注意力检测模态框
+    // 随机注意力检测模态
     const attentionChecks = [
       { question: "Please answer: What is your favorite color? Please read the following instructions carefully and answer 'Navy'.", correctAnswer: "Navy" },
       { question: "Attention check: Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
@@ -396,6 +422,7 @@
     setTimeout(function(){
       showAttentionCheck();
     }, 30000);
+
     document.getElementById("attentionSubmit").addEventListener("click", function(){
       let userAnswer = document.getElementById("attentionAnswer").value.trim();
       let correctAnswer = document.getElementById("attentionModal").getAttribute("data-correct");
