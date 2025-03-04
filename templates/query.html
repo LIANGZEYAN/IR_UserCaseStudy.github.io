@@ -268,13 +268,18 @@
         let originalText = element.getAttribute('data-fulltext');
         element.querySelector(".doc-content").innerText = originalText;
       } else {
-        // 未选中，打开模态框进行 Passage Selection
+        // 第一次点击(还未选中)：先打LOG，再打开模态框
         currentDocId = docId;
         let fullText = element.getAttribute('data-fulltext');
+
+        // 这一行是新增的，用于记录第一次点击打开文档：
+        logEvent(docId, 'OPEN_DOC'); 
+
         document.getElementById("enlargeDoc").innerText = fullText;
         document.getElementById("enlargeModal").style.display = "block";
       }
     }
+
     function submitPassageSelection() {
       let fullText = document.getElementById("enlargeDoc").innerText;
       let selectedText = window.getSelection().toString();
