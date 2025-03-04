@@ -234,17 +234,17 @@ def query_page(query_id):
             else:
                 # 第一次 -> 生成 doc_order
                 c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY docno LIMIT 9", (query_id,))
-                raw_doc_ids = [r["id"] for r in c.fetchall()]
+                raw_docnos = [r["id"] for r in c.fetchall()]
 
                 # 计算 row_index
                 row_index = (abs(hash(user_id)) + query_id) % 9
                 # 取拉丁方的一行
                 perm = LATIN_9x9[row_index]  # e.g. [2,5,9,4,1,3,7,8,6]
 
-                # 重排 doc_ids
-                # 这里假设 raw_doc_ids 至少有 9 篇文档，否则会 index out of range
+                # 重排 docnos
+                # 这里假设 raw_docnos 至少有 9 篇文档，否则会 index out of range
                 # 如果不一定有 9 篇，可以加个判断
-                doc_order = [raw_doc_ids[perm[i] - 1] for i in range(9)]
+                doc_order = [raw_docnos[perm[i] - 1] for i in range(9)]
                 doc_order_str = ",".join(str(x) for x in doc_order)
 
                 # 存到 orders 表
@@ -285,7 +285,7 @@ def log_event():
         return jsonify({'error': 'No data provided'}), 400
 
     user_id = data.get('userId')
-    doc_id = data.get('docId')
+    docno = data.get('docId')
     event_type = data.get('eventType')
     duration = data.get('duration', 0)
     timestamp = datetime.now().isoformat()
@@ -294,10 +294,10 @@ def log_event():
     try:
         with conn.cursor() as c:
             sql = """
-                INSERT INTO logs (user_id, doc_id, event_type, duration, timestamp)
+                INSERT INTO logs (user_id, docno, event_type, duration, timestamp)
                 VALUES (%s, %s, %s, %s, %s)
             """
-            c.execute(sql, (user_id, doc_id, event_type, duration, timestamp))
+            c.execute(sql, (user_id, docno, event_type, duration, timestamp))
         conn.commit()
     finally:
         conn.close()
