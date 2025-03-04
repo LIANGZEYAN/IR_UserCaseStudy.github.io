@@ -183,6 +183,8 @@
   <div id="enlargeModal" class="modal">
     <div class="modal-content">
       <h2>Document Passage Selection</h2>
+      <!-- 在这里增加查询内容显示 -->
+      <h3 id="enlargeQuery"></h3>
       <div id="enlargeDoc"></div>
       <p>Select a portion of the text that supports why this document is relevant to the query.</p>
       <button onclick="submitPassageSelection()">Submit Selection</button>
@@ -191,7 +193,13 @@
   </div>
 
   <script>
-    // 全局建立 docNoMapping 用于存储每个文档的 docno
+    // 我们把 queryContent 取到 JS 中，便于在弹框中显示
+    let queryContent = "{{ query_content }}";
+    let currentQid = {{ query_id }};
+    let userId = "{{ session['user_id'] }}";
+    let lastEventTime = Date.now();
+
+    // 全局建立 docNoMapping，用于存储每个文档的 docno
     let docNoMapping = {};
     document.addEventListener("DOMContentLoaded", function(){
       // 建立映射，并恢复选中状态和高亮内容
@@ -209,10 +217,6 @@
         }
       });
     });
-
-    let currentQid = {{ query_id }};
-    let userId = "{{ session['user_id'] }}";
-    let lastEventTime = Date.now();
 
     // logEvent 函数：记录事件，并附加详细信息（格式：duration:xx, docno:xx, qid:xx）
     function logEvent(docId, eventType) {
@@ -250,7 +254,7 @@
       .catch(err => console.error(err));
     }
 
-    // PART 1: Passage Selection & 高亮显示
+    // 选中/取消选中文档
     let currentDocId = null;
     function openEnlargeModal(element) {
       let docId = element.getAttribute('data-docid');
@@ -272,9 +276,11 @@
         currentDocId = docId;
         let fullText = element.getAttribute('data-fulltext');
 
-        // 这一行是新增的，用于记录第一次点击打开文档：
+        // 记录打开文档事件
         logEvent(docId, 'OPEN_DOC'); 
 
+        // 在放大框里同时显示 query 内容
+        document.getElementById("enlargeQuery").innerText = queryContent;
         document.getElementById("enlargeDoc").innerText = fullText;
         document.getElementById("enlargeModal").style.display = "block";
       }
@@ -310,11 +316,14 @@
       }
       document.getElementById("enlargeModal").style.display = "none";
     }
+
     function cancelPassageSelection() {
+      // 用户打开了文档，但未做选文就关闭 -> 我们记录一个 CANCEL_DOC
+      logEvent(currentDocId, 'CANCEL_DOC');
       document.getElementById("enlargeModal").style.display = "none";
     }
 
-    // PART 2: Navigation and Pause
+    // 页面导航和暂停
     function navigatePage(target) {
       logEvent("PAGE_NAV", target === 'next' ? 'NAV_NEXT' : 'NAV_BACK');
       if (target === 'next') {
@@ -334,7 +343,7 @@
       window.location.href = "/pause?query=" + currentQid;
     }
 
-    // PART 3: Bot Detection (Query 1 only)
+    // Bot Detection (仅在 Query 1)
     {% if query_id == 1 %}
       let botThreshold = Math.floor(Math.random() * 99) + 1;
       document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
@@ -363,7 +372,7 @@
       });
     {% endif %}
 
-    // PART 4: Random Attention Check Modal
+    // 随机注意力检测模态框
     const attentionChecks = [
       { question: "Please answer: What is your favorite color? Please read the following instructions carefully and answer 'Navy'.", correctAnswer: "Navy" },
       { question: "Attention check: Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
