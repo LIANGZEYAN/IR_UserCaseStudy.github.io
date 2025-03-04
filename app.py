@@ -61,12 +61,16 @@ def init_db():
             if not c.fetchone():
                 c.execute('''
                     CREATE TABLE logs (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        user_id VARCHAR(100) NOT NULL,
-                        doc_id VARCHAR(100),
-                        event_type VARCHAR(255),
-                        duration INT,
-                        timestamp VARCHAR(255)
+                      id INT AUTO_INCREMENT PRIMARY KEY,
+                      user_id VARCHAR(100) NOT NULL,     -- 用户ID
+                      qid INT DEFAULT 0,                 -- 查询ID (可选)
+                      docno INT DEFAULT 0,               -- 文档标号
+                      event_type VARCHAR(100) NOT NULL,  -- "PASSAGE_SELECTION", "OPEN_DOC", ...
+                      start_idx INT DEFAULT -1,          -- 选文起始索引，没有就 -1
+                      end_idx INT DEFAULT -1,            -- 选文结束索引，没有就 -1
+                      duration INT DEFAULT 0,            -- 上一次到本次事件的耗时
+                      pass_flag TINYINT DEFAULT 0,       -- 0 or 1
+                      timestamp DATETIME                 -- 记录时间
                     )
                 ''')
                 print("Created table: logs")
