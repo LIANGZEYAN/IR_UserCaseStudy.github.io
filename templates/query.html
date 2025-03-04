@@ -61,11 +61,13 @@
     .nav-btn:hover, .pause-btn:hover {
       background-color: #45a049;
     }
+    /* Pause 按钮置于右上角 */
     .pause-btn {
       position: absolute;
       top: 20px;
       right: 20px;
     }
+    /* 模态框样式 */
     .modal {
       display: none;
       position: fixed;
@@ -115,6 +117,7 @@
       display: block;
       margin-top: 10px;
     }
+    /* 放大文档区域，允许文本选取 */
     #enlargeDoc {
       border: 1px solid #ccc;
       padding: 15px;
@@ -129,13 +132,17 @@
 </head>
 <body>
   <div class="container">
+    <!-- Pause 按钮 -->
     <button class="pause-btn" onclick="pauseSurvey()">Pause</button>
+    <!-- 进度提示 -->
     <div class="progress">Progress: Query {{ query_id }} of 3</div>
+    <!-- 查询内容与说明 -->
     <h2>{{ query_content }}</h2>
     <p>Task: Please select the document you find most relevant to the query above. To explain your choice, click a document to enlarge it and select the passage that supports your decision.</p>
     
     <div class="grid-container">
       {% for doc in docs %}
+        <!-- 无 doc_id，仅用 docno -->
         <div class="grid-item" 
              data-docno="{{ doc.docno }}"
              data-fulltext="{{ doc.content|e }}" 
@@ -144,6 +151,7 @@
         </div>
       {% endfor %}
     </div>
+    <!-- 导航按钮 -->
     <div style="text-align: center;">
       {% if query_id > 1 %}
       <button class="nav-btn" onclick="goBack()">Back</button>
@@ -152,6 +160,7 @@
     </div>
   </div>
 
+  <!-- Bot 检测模态框（仅在 Query 1 且未通过时显示） -->
   {% if query_id == 1 %}
   <div id="botModal" class="modal">
     <div class="modal-content">
@@ -164,6 +173,7 @@
   </div>
   {% endif %}
 
+  <!-- 随机注意力检测模态框 -->
   <div id="attentionModal" class="modal">
     <div class="modal-content">
       <h2>Attention Check</h2>
@@ -173,6 +183,7 @@
     </div>
   </div>
 
+  <!-- 放大文档及 Passage Selection 模态框 -->
   <div id="enlargeModal" class="modal">
     <div class="modal-content">
       <h2>Document Passage Selection</h2>
@@ -185,21 +196,16 @@
   </div>
 
   <script>
-    // Ensure query_id is correctly set; if missing, default to 1.
-    let currentQid = {{ query_id | default(1) }};
-    console.debug("Current Qid:", currentQid);
-    let userId = "{{ session['user_id'] }}";
-    let lastEventTime = Date.now();
+    // 全局变量
+    let userId = "{{ session['user_id'] }}";  // 从后端session拿到
+    let currentQid = {{ query_id }};          // 当前查询ID
+    let lastEventTime = Date.now();           // 用于计算duration
+
+    // 只需要 docno, 不需要 doc_id
     let currentDocno = 0;
 
-    // Utility: Normalize whitespace
-    function unifyWhitespace(str) {
-      return str.replace(/\r/g, "")
-                .replace(/\s+/g, " ")
-                .trim();
-    }
-
-    // logEvent: sends userId, qid, docno, eventType, startIndex, endIndex, duration, passFlag
+    // ---------------------- 通用的 logEvent 函数 ----------------------
+    // 此函数只发送: userId, qid, docno, eventType, startIndex, endIndex, duration, passFlag
     function logEvent({
       docno = 0,
       eventType = "",
@@ -210,91 +216,110 @@
       let now = Date.now();
       let duration = now - lastEventTime;
       lastEventTime = now;
+
       let payload = {
         userId: userId,
         qid: currentQid,
         docno: docno,
-        eventType: eventType,
+        eventType: eventType,   // "OPEN_DOC", "PASSAGE_SELECTION", etc.
         startIndex: startIndex,
         endIndex: endIndex,
         duration: duration,
-        passFlag: passFlag
+        passFlag: passFlag      // 0或1
       };
-      console.debug("Logging Event:", payload);
+
       fetch('/api/log', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
       })
       .then(response => response.json())
-      .then(data => console.debug("Log response:", data))
+      .then(data => console.log("Log response:", data))
       .catch(err => console.error("Log error:", err));
     }
 
-    // Open or unselect a document
+    // ---------------------- 打开/取消选文弹窗 ----------------------
     function openEnlargeModal(element) {
-      let docno = parseInt(element.getAttribute('data-docno'), 10);
+      // 读取 docno
+      const docno = parseInt(element.getAttribute('data-docno'), 10);
+
       if (element.classList.contains('selected')) {
+        // 已选中 => 取消
         element.classList.remove('selected');
-        logEvent({ docno: docno, eventType: "UNSELECT" });
+        // 这里可以有选中文档列表的逻辑(若需要)
+        logEvent({
+          docno: docno,
+          eventType: "UNSELECT"
+        });
+        // 恢复原文
         let originalText = element.getAttribute('data-fulltext');
         element.querySelector(".doc-content").innerText = originalText;
       } else {
+        // 未选中 => 打开查看
         currentDocno = docno;
         let fullText = element.getAttribute('data-fulltext');
-        logEvent({ docno: docno, eventType: "OPEN_DOC" });
+        logEvent({
+          docno: docno,
+          eventType: "OPEN_DOC"
+        });
         document.getElementById("enlargeDoc").innerText = fullText;
         document.getElementById("enlargeModal").style.display = "block";
       }
     }
 
     function cancelPassageSelection() {
-      logEvent({ docno: currentDocno, eventType: "CANCEL_DOC" });
+      // 用户打开了文档，但又没选就关 => CANCEL_DOC
+      logEvent({
+        docno: currentDocno,
+        eventType: "CANCEL_DOC"
+      });
       document.getElementById("enlargeModal").style.display = "none";
     }
 
+    // ---------------------- 提交选文逻辑 ----------------------
     function submitPassageSelection() {
       let enlargeDocElem = document.getElementById("enlargeDoc");
       let rawFullText = enlargeDocElem.innerText;
       let rawSelectedText = window.getSelection().toString();
-      console.debug("Full text:", rawFullText);
-      console.debug("Selected text:", rawSelectedText);
+
       if (!rawSelectedText.trim()) {
         alert("Please select a portion of the text before submitting.");
         return;
       }
-      // Normalize whitespace before search
-      let cleanFullText = unifyWhitespace(rawFullText);
-      let cleanSelected = unifyWhitespace(rawSelectedText);
-      console.debug("Clean full text:", cleanFullText);
-      console.debug("Clean selected:", cleanSelected);
-      let startIndex = cleanFullText.indexOf(cleanSelected);
+      let startIndex = rawFullText.indexOf(rawSelectedText);
       if (startIndex === -1) {
-        alert("Could not find the selected text in the document. Try selecting again.");
+        alert("Could not find the selected text in the doc. Try selecting again.");
         return;
       }
-      // Note: If cleanFullText was normalized, the original indices may differ.
-      // For simplicity, we assume fullText has similar structure.
-      let endIndex = startIndex + cleanSelected.length;
+      let endIndex = startIndex + rawSelectedText.length;
+
       logEvent({
         docno: currentDocno,
         eventType: "PASSAGE_SELECTION",
         startIndex: startIndex,
         endIndex: endIndex
       });
+
+      // 选中后高亮/存状态等
       let item = document.querySelector('.grid-item[data-docno="' + currentDocno + '"]');
       if (item) {
         item.classList.add('selected');
+        // 生成带<mark>的高亮文本
         let highlighted = rawFullText.substring(0, startIndex)
                          + "<mark>" + rawFullText.substring(startIndex, endIndex) + "</mark>"
                          + rawFullText.substring(endIndex);
         item.querySelector(".doc-content").innerHTML = highlighted;
       }
+
       document.getElementById("enlargeModal").style.display = "none";
     }
 
+    // ---------------------- 页面导航 & 暂停 ----------------------
     function navigatePage(target) {
-      logEvent({ eventType: "PAGE_NAV" });
+      // 记录事件
+      logEvent({
+        eventType: "PAGE_NAV"
+      });
       if (target === 'next') {
         window.location.href = currentQid < 3 ? "/query/" + (currentQid + 1) : "/thanks";
       } else {
@@ -308,11 +333,13 @@
       navigatePage('back');
     }
     function pauseSurvey() {
-      logEvent({ eventType: "PAGE_NAV" });
+      logEvent({
+        eventType: "PAGE_NAV"  // 或 "NAV_PAUSE"
+      });
       window.location.href = "/pause?query=" + currentQid;
     }
 
-    // BOT Detection (only for query 1)
+    // ---------------------- Bot Detection (仅 Query 1) ----------------------
     {% if query_id == 1 %}
       let botThreshold = Math.floor(Math.random() * 99) + 1;
       document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
@@ -331,7 +358,11 @@
       document.getElementById("botVerify").addEventListener("click", function(){
         if (parseInt(botSlider.value) >= botThreshold) {
           let botDetectionDuration = Date.now() - botDetectionStart;
-          logEvent({ eventType: "BOT_DETECTION", passFlag: 1 });
+          // passFlag=1 表示通过
+          logEvent({
+            eventType: "BOT_DETECTION",
+            passFlag: 1
+          });
           sessionStorage.setItem("botChecked", "true");
           document.getElementById("botModal").style.display = "none";
           lastEventTime = Date.now();
@@ -341,19 +372,20 @@
       });
     {% endif %}
 
-    // Random Attention Check
+    // ---------------------- 随机注意力检测 ----------------------
     const attentionChecks = [
-      { question: "Please answer: What is your favorite color? (Answer 'Navy')", correctAnswer: "Navy" },
-      { question: "Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
-      { question: "Please type 'Elephant' if you read carefully.", correctAnswer: "Elephant" },
-      { question: "What is 2+2? (Answer '4')", correctAnswer: "4" },
-      { question: "Answer 'Blue' to the following: What color do you see?", correctAnswer: "Blue" },
-      { question: "Enter the secret word 'Sunshine'.", correctAnswer: "Sunshine" },
-      { question: "Type 'Correct' to confirm you read the instructions.", correctAnswer: "Correct" },
-      { question: "Answer 'Yes, I have read it'.", correctAnswer: "Yes, I have read it" },
-      { question: "If you read instructions, type 'Confirmed'.", correctAnswer: "Confirmed" },
-      { question: "If paying attention, answer 'Verified'.", correctAnswer: "Verified" }
+      { question: "Please answer: What is your favorite color? Please read the following instructions carefully and answer 'Navy'.", correctAnswer: "Navy" },
+      { question: "Attention check: Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
+      { question: "For verification, please type 'Elephant' if you have read these instructions carefully.", correctAnswer: "Elephant" },
+      { question: "What is 2+2? (If you have read all instructions, answer '4'.)", correctAnswer: "4" },
+      { question: "To verify your attention, please answer 'Blue' to the following: What color do you see?", correctAnswer: "Blue" },
+      { question: "Please enter the secret word 'Sunshine' if you are reading this properly.", correctAnswer: "Sunshine" },
+      { question: "Attention: Please type 'Correct' to confirm you have read the instructions.", correctAnswer: "Correct" },
+      { question: "For quality control, please answer with 'Yes, I have read it' if you understand these instructions.", correctAnswer: "Yes, I have read it" },
+      { question: "If you have carefully read all instructions, please type 'Confirmed'.", correctAnswer: "Confirmed" },
+      { question: "Verification: If you are paying attention, please answer 'Verified'.", correctAnswer: "Verified" }
     ];
+
     function showAttentionCheck() {
       let randomIndex = Math.floor(Math.random() * attentionChecks.length);
       let selectedCheck = attentionChecks[randomIndex];
@@ -362,19 +394,31 @@
       document.getElementById("attentionModal").setAttribute("data-correct", selectedCheck.correctAnswer);
       document.getElementById("attentionModal").style.display = "block";
     }
+
     setTimeout(function(){
       showAttentionCheck();
-    }, 30000);
+    }, 120000);
+
     document.getElementById("attentionSubmit").addEventListener("click", function(){
       let userAnswer = document.getElementById("attentionAnswer").value.trim();
       let correctAnswer = document.getElementById("attentionModal").getAttribute("data-correct");
+      let questionText = document.getElementById("attentionModal").getAttribute("data-question");
+
       if (userAnswer === correctAnswer) {
-        logEvent({ eventType: "ATTENTION_CHECK", passFlag: 1 });
+        // passFlag=1 => 通过
+        logEvent({
+          eventType: "ATTENTION_CHECK",
+          passFlag: 1
+        });
         document.getElementById("attentionModal").style.display = "none";
         lastEventTime = Date.now();
       } else {
-        alert("Incorrect. Please read the instructions carefully.");
-        logEvent({ eventType: "ATTENTION_CHECK", passFlag: 0 });
+        alert("Your answer is incorrect. Please make sure you read the instructions carefully.");
+        // passFlag=0 => 未通过
+        logEvent({
+          eventType: "ATTENTION_CHECK",
+          passFlag: 0
+        });
       }
     });
   </script>
