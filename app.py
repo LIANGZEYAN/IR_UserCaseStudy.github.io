@@ -50,8 +50,8 @@ def get_connection():
 # ------------------ 3) 初始化数据库表 ------------------
 def init_db():
     """
-    创建 queries, documents, orders, logs 四张表(若不存在)；
-    并在 documents / queries 无数据时插入初始记录。
+    创建 queries, documents, orders, logs 四张表(若不存在)。
+    不插入任何示例数据。
     """
     conn = get_connection()
     try:
@@ -64,7 +64,7 @@ def init_db():
                       id INT AUTO_INCREMENT PRIMARY KEY,
                       user_id VARCHAR(100) NOT NULL,     -- 用户ID
                       qid INT DEFAULT 0,                 -- 查询ID (可选)
-                      docno INT DEFAULT 0,               -- 文档标号
+                      docno VARCHAR(255) DEFAULT '',     -- 文档标号，使用VARCHAR
                       event_type VARCHAR(100) NOT NULL,  -- "PASSAGE_SELECTION", "OPEN_DOC", ...
                       start_idx INT DEFAULT -1,          -- 选文起始索引，没有就 -1
                       end_idx INT DEFAULT -1,            -- 选文结束索引，没有就 -1
@@ -78,59 +78,23 @@ def init_db():
             # --- 2) documents 表 ---
             c.execute("SHOW TABLES LIKE 'documents'")
             if not c.fetchone():
-                # 如果 documents 表不存在，则创建
+                # 如果 documents 表不存在，则创建，docno使用VARCHAR
                 c.execute('''
                     CREATE TABLE documents (
                         id INT PRIMARY KEY,
                         qid INT,
-                        docno INT,
+                        docno VARCHAR(255),
                         content TEXT
                     )
                 ''')
                 print("Created table: documents")
-
-            # 无论表是否新建，都可先检查行数
-            c.execute("SELECT COUNT(*) AS cnt FROM documents")
-            doc_count = c.fetchone()["cnt"]
-            # 如果 documents 里是空的，就插入示例数据
-            if doc_count == 0:
-                docs_insert = [
-                    (1, 1, 11, 'Higher average temperatures can speed up crop growth cycles, sometimes reducing yields and affecting crop quality.'),
-                    (2, 1, 12, 'More frequent droughts, floods, and heatwaves threaten harvests and raise economic risks for farmers worldwide.'),
-                    (3, 1, 13, 'Warmer climates allow pests and pathogens to expand their range, putting additional stress on crops and yields.'),
-                    (4, 1, 14, 'Changes in rainfall patterns and competition for water resources make irrigation more challenging, particularly in arid regions.'),
-                    (5, 1, 15, 'Fluctuating rain intensity and prolonged droughts erode topsoil and reduce soil fertility, requiring careful land management.'),
-                    (6, 1, 16, 'As growing conditions change, farmers may need to adopt heat- or drought-tolerant crops or move to new planting zones.'),
-                    (7, 1, 17, 'Extreme heat affects animal health, feed availability, and grazing land productivity, raising costs for livestock producers.'),
-                    (8, 1, 18, 'Unpredictable harvests can drive up food prices and jeopardize global food supplies, hitting vulnerable populations the hardest.'),
-                    (9, 1, 19, 'Techniques like organic farming, precision irrigation, and conservation tillage help enhance resilience against climate impacts.'),
-                    (10, 2, 21, 'Regular exercise improves cardiovascular health, strengthens muscles, and boosts mental well-being. Studies show that engaging in at least 150 minutes of moderate-intensity exercise per week reduces the risk of chronic diseases like diabetes and hypertension.'),
-                    (11, 2, 22, 'Exercise plays a crucial role in maintaining a healthy weight and enhancing brain function. Physical activity has been linked to improved memory, reduced stress, and a lower likelihood of developing conditions such as depression and anxiety.'),
-                    (12, 2, 23, 'A balanced diet and good sleep are also key factors in maintaining overall health. While exercise is beneficial, it should be combined with proper nutrition and adequate rest for the best results.'),
-                    (13, 2, 24, 'Walking daily can be a simple yet effective form of exercise. Even short walks can improve circulation, aid digestion, and contribute to weight management.'),
-                    (14, 2, 25, 'Many people find it challenging to stick to an exercise routine due to time constraints and lack of motivation. However, setting small, achievable goals and finding an enjoyable activity can make it easier to maintain a consistent habit.'),
-                    (15, 2, 26, 'The human body requires essential nutrients such as vitamins, proteins, and minerals to function properly. While food plays a major role in health, physical activity can complement its benefits.'),
-                    (16, 2, 27, 'Some people prefer indoor workouts like yoga or Pilates, while others enjoy outdoor activities such as hiking or running. The choice of exercise largely depends on personal preference and fitness goals.'),
-                    (17, 2, 28, 'Technological advancements in smartwatches and fitness trackers have made it easier for people to monitor their health and activity levels, encouraging them to stay active.'),
-                    (18, 2, 29, 'Traveling to different countries can provide opportunities to experience new cultures, try different foods, and explore diverse landscapes.'),
-                    (19, 3, 31, 'Inflation is primarily caused by an increase in the money supply, rising production costs, and high consumer demand. When too much money circulates in the economy without a corresponding rise in goods and services, prices go up.'),
-                    (20, 3, 32, 'Cost-push inflation occurs when the costs of raw materials, wages, and production increase, leading businesses to raise prices to maintain profitability. This is often triggered by supply chain disruptions or rising oil prices.'),
-                    (21, 3, 33, 'Demand-pull inflation happens when consumer demand for goods and services exceeds supply. This can be driven by economic growth, low unemployment, or government stimulus measures that increase spending.'),
-                    (22, 3, 34, 'Central banks control inflation by adjusting interest rates. When inflation is high, they raise interest rates to slow down borrowing and spending, helping to stabilize prices.'),
-                    (23, 3, 35, 'Exchange rate fluctuations can influence inflation. A weaker currency makes imported goods more expensive, raising overall prices in the economy.'),
-                    (24, 3, 36, 'Stock market trends can indirectly affect inflation, as investor confidence and asset prices influence spending behaviors, but stock prices themselves do not directly cause inflation.'),
-                    (25, 3, 37, 'Technological advancements can help reduce inflation by improving production efficiency and lowering costs, but their impact varies across industries.'),
-                    (26, 3, 38, 'Space exploration budgets have increased in recent years, with countries investing in new missions to explore Mars and the Moon.'),
-                    (27, 3, 39, 'Many people adopt plant-based diets for health and environmental reasons, leading to increased demand for alternative protein sources such as tofu and plant-based meat.')
-                ]
-
-                # 注意这里要有4个占位符，对应 (id, qid, docno, content)
-                insert_sql = """
-                    INSERT INTO documents (id, qid, docno, content)
-                    VALUES (%s, %s, %s, %s)
-                """
-                c.executemany(insert_sql, docs_insert)
-                print("Inserted initial documents data into `documents`")
+            else:
+                # 修改docno列类型为VARCHAR
+                try:
+                    c.execute("ALTER TABLE documents MODIFY COLUMN docno VARCHAR(255)")
+                    print("Modified docno column to VARCHAR(255)")
+                except Exception as e:
+                    print(f"修改列类型时出错: {e}")
 
             # --- 3) orders 表 ---
             c.execute("SHOW TABLES LIKE 'orders'")
@@ -156,21 +120,6 @@ def init_db():
                     )
                 ''')
                 print("Created table: queries")
-
-            # 无论表是否新建，都可检查其行数
-            c.execute("SELECT COUNT(*) AS cnt FROM queries")
-            q_count = c.fetchone()["cnt"]
-            if q_count == 0:
-                # 插入 3 条查询
-                query_data = [
-                    (1, "Climate Change Impacts on Agriculture"),
-                    (2, "What are the benefits of regular exercise?"),
-                    (3, "What are the causes of inflation?")
-                ]
-                # 对应 2 个列 (id, content)，所以只用 2 个占位符
-                q_insert_sql = "INSERT INTO queries (id, content) VALUES (%s, %s)"
-                c.executemany(q_insert_sql, query_data)
-                print("Inserted initial queries data into `queries`")
 
         conn.commit()
     finally:
@@ -308,9 +257,119 @@ def log_event():
 
     return jsonify({'message': 'Log received'}), 200
 
+def import_df_to_database(df):
+    """
+    从DataFrame导入数据到数据库的queries和documents表。
+    DataFrame应包含qid, query, docno, text列。
+    如果表不存在，会先创建表结构。
+    """
+    # 先确保表结构存在
+    init_db()
+    
+    # 先插入查询，再插入文档
+    insert_queries_from_df(df)
+    insert_documents_from_df(df)
+    
+def insert_queries_from_df(df):
+    """
+    从DataFrame导入唯一查询到queries表。
+    """
+    # 获取唯一查询
+    unique_queries = df[['qid', 'query']].drop_duplicates().reset_index(drop=True)
+    
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 检查已存在的查询ID
+            c.execute("SELECT id FROM queries")
+            existing_ids = [row['id'] for row in c.fetchall()]
+            
+            # 准备插入数据
+            insert_data = []
+            for _, row in unique_queries.iterrows():
+                # 如果查询ID已存在则跳过
+                if row['qid'] in existing_ids:
+                    continue
+                    
+                insert_data.append((
+                    row['qid'],      # id
+                    row['query']     # content
+                ))
+                
+            if insert_data:
+                # 批量插入数据到queries表
+                insert_sql = """
+                    INSERT INTO queries (id, content)
+                    VALUES (%s, %s)
+                """
+                c.executemany(insert_sql, insert_data)
+                
+        conn.commit()
+        print(f"成功插入 {len(insert_data)} 条记录到queries表")
+    except Exception as e:
+        print(f"插入queries时出错: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+def insert_documents_from_df(df):
+    """
+    从DataFrame导入文档数据到documents表。
+    将'text'列映射到数据库的'content'列。
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 获取当前最大id作为起点
+            c.execute("SELECT MAX(id) as max_id FROM documents")
+            result = c.fetchone()
+            start_id = result['max_id'] if result['max_id'] is not None else 0
+            
+            # 准备插入数据
+            insert_data = []
+            for i, row in df.iterrows():
+                doc_id = start_id + i + 1
+                insert_data.append((
+                    doc_id,           # id
+                    row['qid'],       # qid
+                    row['docno'],     # docno (VARCHAR类型，可以直接插入字符串)
+                    row['text']       # content (从'text'映射)
+                ))
+                
+            # 批量插入数据到documents表
+            insert_sql = """
+                INSERT INTO documents (id, qid, docno, content)
+                VALUES (%s, %s, %s, %s)
+            """
+            c.executemany(insert_sql, insert_data)
+            
+        conn.commit()
+        print(f"成功插入 {len(df)} 条记录到documents表")
+    except Exception as e:
+        print(f"插入documents时出错: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
+
+try:
+    # 读取CSV文件
+    df = pd.read_csv("selected_docs.csv")
+    
+    # 检查必要的列是否存在
+    required_columns = ['qid', 'query', 'docno', 'text']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
+    else:
+        # 导入数据到数据库
+        import_df_to_database(df)
+        print(f"成功从 {csv_path} 导入数据")
+except Exception as e:
+    print(f"导入数据时出错: {e}")
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
