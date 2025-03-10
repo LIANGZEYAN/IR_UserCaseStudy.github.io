@@ -356,27 +356,6 @@ def insert_documents_from_df(df):
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
 
-def check_document_counts():
-    """检查每个查询ID下的文档数量，确保有足够的文档"""
-    conn = get_connection()
-    try:
-        with conn.cursor() as c:
-            # 获取所有查询ID
-            c.execute("SELECT id FROM queries")
-            query_ids = [row['id'] for row in c.fetchall()]
-            
-            # 检查每个查询ID下的文档数量
-            for qid in query_ids:
-                c.execute("SELECT COUNT(*) as doc_count FROM documents WHERE qid=%s", (qid,))
-                count = c.fetchone()['doc_count']
-                if count < 9:
-                    print(f"警告: 查询ID {qid} 只有 {count} 个文档，少于所需的9个文档")
-    finally:
-        conn.close()
-
-# 在应用启动时调用此函数
-check_document_counts()
-
 try:
     # 读取CSV文件
     df = pd.read_csv("selected_docs.csv")
@@ -393,6 +372,49 @@ try:
         print(f"成功从 selected_docs.csv 导入数据")
 except Exception as e:
     print(f"导入数据时出错: {e}")
+
+def check_query_document_counts():
+    """检查每个查询ID下的文档数量，并输出统计信息"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 获取所有查询ID
+            c.execute("SELECT id FROM queries ORDER BY id")
+            query_ids = [row['id'] for row in c.fetchall()]
+            
+            print(f"总共有 {len(query_ids)} 个查询")
+            
+            # 检查每个查询ID下的文档数量
+            query_counts = {}
+            for qid in query_ids:
+                c.execute("SELECT COUNT(*) as doc_count FROM documents WHERE qid=%s", (qid,))
+                count = c.fetchone()['doc_count']
+                query_counts[qid] = count
+                print(f"查询ID {qid} 有 {count} 个文档")
+            
+            # 统计分析
+            exact_nine = sum(1 for count in query_counts.values() if count == 9)
+            less_than_nine = sum(1 for count in query_counts.values() if count < 9)
+            more_than_nine = sum(1 for count in query_counts.values() if count > 9)
+            zero_docs = sum(1 for count in query_counts.values() if count == 0)
+            
+            print("\n统计信息:")
+            print(f"正好有9个文档的查询: {exact_nine}")
+            print(f"少于9个文档的查询: {less_than_nine}")
+            print(f"多于9个文档的查询: {more_than_nine}")
+            print(f"没有文档的查询: {zero_docs}")
+            
+            # 找出文档数少于9的查询ID
+            if less_than_nine > 0:
+                print("\n文档数少于9的查询ID:")
+                for qid, count in query_counts.items():
+                    if count < 9:
+                        print(f"查询ID {qid}: {count} 个文档")
+    finally:
+        conn.close()
+
+# 调用函数
+check_query_document_counts()
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
