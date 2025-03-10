@@ -368,7 +368,7 @@ try:
     else:
         # 导入数据到数据库
         import_df_to_database(df)
-        print(f"成功从 {csv_path} 导入数据")
+        print(f"成功从 selected_docs.csv 导入数据")
 except Exception as e:
     print(f"导入数据时出错: {e}")
 
