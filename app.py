@@ -163,60 +163,81 @@ def query_page(query_id):
         else:
             return redirect(url_for("thanks"))
 
-    conn = get_connection()
     try:
-        with conn.cursor() as c:
-            # 先从 queries 表获取此 query 的内容
-            c.execute("SELECT content FROM queries WHERE id=%s", (query_id,))
-            row_q = c.fetchone()
-            if row_q:
-                query_content = row_q["content"]
-            else:
-                query_content = f"Query {query_id} (No data)"
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                # 先从 queries 表获取此 query 的内容
+                c.execute("SELECT content FROM queries WHERE id=%s", (query_id,))
+                row_q = c.fetchone()
+                if row_q:
+                    query_content = row_q["content"]
+                else:
+                    query_content = f"Query {query_id} (No data)"
 
-            # 再看 orders 表有没有记录
-            c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
-            row_o = c.fetchone()
-            if row_o:
-                # 已有顺序
-                doc_order_str = row_o["doc_order"]
-                doc_order = [int(x) for x in doc_order_str.split(",")]
-            else:
-                # 第一次 -> 生成 doc_order
-                c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY docno LIMIT 9", (query_id,))
-                raw_docnos = [r["id"] for r in c.fetchall()]
+                # 再看 orders 表有没有记录
+                c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
+                row_o = c.fetchone()
+                if row_o:
+                    # 已有顺序
+                    doc_order_str = row_o["doc_order"]
+                    doc_order = [int(x) for x in doc_order_str.split(",")]
+                else:
+                    # 第一次 -> 生成 doc_order
+                    # 修改: 使用id排序代替docno排序，这样更可靠
+                    c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
+                    raw_docnos = [r["id"] for r in c.fetchall()]
+                    
+                    if not raw_docnos:
+                        # 如果没有文档，返回空列表
+                        doc_order = []
+                    else:
+                        # 保证至少有9个文档可用
+                        if len(raw_docnos) >= 9:
+                            # 计算 row_index
+                            row_index = (abs(hash(user_id)) + query_id) % 9
+                            # 取拉丁方的一行
+                            perm = LATIN_9x9[row_index]
+                            
+                            # 安全地重排文档
+                            doc_order = []
+                            for i in range(9):
+                                idx = perm[i] - 1
+                                if 0 <= idx < len(raw_docnos):  # 安全检查
+                                    doc_order.append(raw_docnos[idx])
+                        else:
+                            # 文档不足9个
+                            print(f"警告: 查询ID {query_id} 只有 {len(raw_docnos)} 个文档，少于所需的9个")
+                            doc_order = raw_docnos.copy()
+                    
+                    # 存到 orders 表
+                    if doc_order:
+                        doc_order_str = ",".join(str(x) for x in doc_order)
+                        c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
+                                (user_id, query_id, doc_order_str))
+                        conn.commit()
 
-                # 计算 row_index
-                row_index = (abs(hash(user_id)) + query_id) % 9
-                # 取拉丁方的一行
-                perm = LATIN_9x9[row_index]  # e.g. [2,5,9,4,1,3,7,8,6]
+                # 根据 doc_order 获取文档详情
+                if doc_order:
+                    placeholders = ",".join(["%s"] * len(doc_order))
+                    sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
+                    params = [query_id] + doc_order
+                    c.execute(sql, params)
+                    rows = c.fetchall()
+                    # 需手动按 doc_order 排序
+                    doc_map = {r["id"]: r for r in rows}
+                    docs = [doc_map[d] for d in doc_order if d in doc_map]
+                else:
+                    docs = []
 
-                # 重排 docnos
-                # 这里假设 raw_docnos 至少有 9 篇文档，否则会 index out of range
-                # 如果不一定有 9 篇，可以加个判断
-                doc_order = [raw_docnos[perm[i] - 1] for i in range(9)]
-                doc_order_str = ",".join(str(x) for x in doc_order)
-
-                # 存到 orders 表
-                c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
-                          (user_id, query_id, doc_order_str))
-                conn.commit()
-
-            # 根据 doc_order 获取文档详情
-            if doc_order:
-                placeholders = ",".join(["%s"] * len(doc_order))
-                sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
-                params = [query_id] + doc_order
-                c.execute(sql, params)
-                rows = c.fetchall()
-                # 需手动按 doc_order 排序
-                doc_map = {r["id"]: r for r in rows}
-                docs = [doc_map[d] for d in doc_order if d in doc_map]
-            else:
-                docs = []
-
-    finally:
-        conn.close()
+        finally:
+            conn.close()
+    except Exception as e:
+        import traceback
+        print(f"ERROR in query_page: {str(e)}")
+        print(traceback.format_exc())
+        docs = []
+        query_content = f"系统暂时遇到问题，请稍后再试。"
 
     return render_template("query.html", query_id=query_id, docs=docs, query_content=query_content)
 
