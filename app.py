@@ -352,8 +352,30 @@ def insert_documents_from_df(df):
     finally:
         conn.close()
 
+
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
+
+def check_document_counts():
+    """检查每个查询ID下的文档数量，确保有足够的文档"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 获取所有查询ID
+            c.execute("SELECT id FROM queries")
+            query_ids = [row['id'] for row in c.fetchall()]
+            
+            # 检查每个查询ID下的文档数量
+            for qid in query_ids:
+                c.execute("SELECT COUNT(*) as doc_count FROM documents WHERE qid=%s", (qid,))
+                count = c.fetchone()['doc_count']
+                if count < 9:
+                    print(f"警告: 查询ID {qid} 只有 {count} 个文档，少于所需的9个文档")
+    finally:
+        conn.close()
+
+# 在应用启动时调用此函数
+check_document_counts()
 
 try:
     # 读取CSV文件
