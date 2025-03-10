@@ -263,107 +263,62 @@ def import_df_to_database(df):
     从DataFrame导入数据到数据库的queries和documents表。
     DataFrame应包含qid, query, docno, text列。
     如果表不存在，会先创建表结构。
-    使用单一连接和分批处理，避免超时问题。
     """
     # 先确保表结构存在
     init_db()
     
-    # 创建一个连接用于整个导入过程
+    # 先插入查询，再插入文档
+    insert_queries_from_df(df)
+    insert_documents_from_df(df)
+    
+def insert_queries_from_df(df):
+    """
+    从DataFrame导入唯一查询到queries表。
+    """
+    # 获取唯一查询
+    unique_queries = df[['qid', 'query']].drop_duplicates().reset_index(drop=True)
+    
     conn = get_connection()
     try:
-        # 先插入查询，再插入文档
-        insert_queries_from_df(df, conn)
-        insert_documents_from_df(df, conn)
-        print("所有数据导入完成！")
+        with conn.cursor() as c:
+            # 检查已存在的查询ID
+            c.execute("SELECT id FROM queries")
+            existing_ids = [row['id'] for row in c.fetchall()]
+            
+            # 准备插入数据
+            insert_data = []
+            for _, row in unique_queries.iterrows():
+                # 如果查询ID已存在则跳过
+                if row['qid'] in existing_ids:
+                    continue
+                    
+                insert_data.append((
+                    row['qid'],      # id
+                    row['query']     # content
+                ))
+                
+            if insert_data:
+                # 批量插入数据到queries表
+                insert_sql = """
+                    INSERT INTO queries (id, content)
+                    VALUES (%s, %s)
+                """
+                c.executemany(insert_sql, insert_data)
+                
+        conn.commit()
+        print(f"成功插入 {len(insert_data)} 条记录到queries表")
     except Exception as e:
-        print(f"导入过程中发生错误: {e}")
+        print(f"插入queries时出错: {e}")
         conn.rollback()
     finally:
         conn.close()
 
-def insert_queries_from_df(df, conn=None):
-    """
-    从DataFrame导入唯一查询到queries表。
-    使用分批处理避免超时问题。
-    
-    参数:
-    df - 包含qid和query列的DataFrame
-    conn - 可选的数据库连接，如不提供则创建新连接
-    """
-    # 控制是否需要关闭连接
-    close_conn = False
-    if conn is None:
-        conn = get_connection()
-        close_conn = True
-    
-    try:
-        with conn.cursor() as c:
-            # 获取唯一查询
-            unique_queries = df[['qid', 'query']].drop_duplicates().reset_index(drop=True)
-            
-            # 检查已存在的查询ID
-            c.execute("SELECT id FROM queries")
-            existing_ids = set(row['id'] for row in c.fetchall())
-            
-            # 过滤掉已存在的查询
-            new_queries = unique_queries[~unique_queries['qid'].isin(existing_ids)]
-            total_new = len(new_queries)
-            
-            if total_new == 0:
-                print("没有新的查询需要插入")
-                return
-                
-            print(f"发现 {total_new} 条新查询需要插入")
-            
-            # 设置分批大小
-            chunk_size = 500
-            total_chunks = (total_new + chunk_size - 1) // chunk_size
-            
-            # 分批处理插入
-            for chunk_idx, chunk_start in enumerate(range(0, total_new, chunk_size)):
-                chunk_end = min(chunk_start + chunk_size, total_new)
-                current_chunk = new_queries.iloc[chunk_start:chunk_end]
-                
-                # 准备插入数据
-                insert_data = [(row['qid'], row['query']) for _, row in current_chunk.iterrows()]
-                
-                if insert_data:
-                    # 批量插入数据到queries表
-                    insert_sql = """
-                        INSERT INTO queries (id, content)
-                        VALUES (%s, %s)
-                    """
-                    c.executemany(insert_sql, insert_data)
-                    conn.commit()  # 每批次提交一次
-                    
-                    progress = (chunk_idx + 1) / total_chunks * 100
-                    print(f"查询导入进度: {progress:.2f}% - 已插入 {chunk_end}/{total_new} 条查询")
-            
-            print(f"成功插入 {total_new} 条记录到queries表")
-    except Exception as e:
-        print(f"插入queries时出错: {e}")
-        if close_conn:
-            conn.rollback()
-        raise  # 重新抛出异常以便上层函数处理
-    finally:
-        if close_conn:
-            conn.close()
-
-def insert_documents_from_df(df, conn=None):
+def insert_documents_from_df(df):
     """
     从DataFrame导入文档数据到documents表。
-    使用分批处理避免超时问题。
-    
-    参数:
-    df - 包含qid, docno, text列的DataFrame
-    conn - 可选的数据库连接，如不提供则创建新连接
+    将'text'列映射到数据库的'content'列。
     """
-    # 控制是否需要关闭连接
-    close_conn = False
-    if conn is None:
-        conn = get_connection()
-        close_conn = True
-    
+    conn = get_connection()
     try:
         with conn.cursor() as c:
             # 获取当前最大id作为起点
@@ -371,122 +326,70 @@ def insert_documents_from_df(df, conn=None):
             result = c.fetchone()
             start_id = result['max_id'] if result['max_id'] is not None else 0
             
-            # 设置分批大小
-            chunk_size = 1000
-            total_rows = len(df)
-            total_chunks = (total_rows + chunk_size - 1) // chunk_size
+            # 准备插入数据
+            insert_data = []
+            for i, row in df.iterrows():
+                doc_id = start_id + i + 1
+                insert_data.append((
+                    doc_id,           # id
+                    row['qid'],       # qid
+                    row['docno'],     # docno (VARCHAR类型，可以直接插入字符串)
+                    row['text']       # content (从'text'映射)
+                ))
+                
+            # 批量插入数据到documents表
+            insert_sql = """
+                INSERT INTO documents (id, qid, docno, content)
+                VALUES (%s, %s, %s, %s)
+            """
+            c.executemany(insert_sql, insert_data)
             
-            print(f"开始导入 {total_rows} 条文档记录，分 {total_chunks} 批处理...")
-            
-            # 分批处理插入
-            for chunk_idx, chunk_start in enumerate(range(0, total_rows, chunk_size)):
-                chunk_end = min(chunk_start + chunk_size, total_rows)
-                current_chunk = df.iloc[chunk_start:chunk_end]
-                
-                # 准备插入数据
-                insert_data = []
-                for i, row in enumerate(current_chunk.itertuples(), 1):
-                    doc_id = start_id + chunk_start + i
-                    # 使用getattr获取属性值，避免直接使用索引
-                    insert_data.append((
-                        doc_id,                     # id
-                        getattr(row, 'qid'),        # qid
-                        getattr(row, 'docno'),      # docno
-                        getattr(row, 'text')        # content (从'text'映射)
-                    ))
-                
-                # 批量插入当前分块数据
-                insert_sql = """
-                    INSERT INTO documents (id, qid, docno, content)
-                    VALUES (%s, %s, %s, %s)
-                """
-                c.executemany(insert_sql, insert_data)
-                conn.commit()  # 每个分块提交一次
-                
-                # 报告进度
-                progress = (chunk_idx + 1) / total_chunks * 100
-                print(f"文档导入进度: {progress:.2f}% - 已处理 {chunk_end}/{total_rows} 条记录")
-                
-            print(f"成功完成，共插入 {total_rows} 条记录到documents表")
+        conn.commit()
+        print(f"成功插入 {len(df)} 条记录到documents表")
     except Exception as e:
         print(f"插入documents时出错: {e}")
-        if close_conn:
-            conn.rollback()
-        raise  # 重新抛出异常以便上层函数处理
-    finally:
-        if close_conn:
-            conn.close()
-
-# 在容器/本地启动时，自动建表并插入初始数据
-def check_and_import():
-    """检查表是否为空，如果为空就导入数据，使用优化的导入流程"""
-    conn = get_connection()
-    try:
-        with conn.cursor() as c:
-            # 检查documents表是否为空
-            c.execute("SELECT COUNT(*) AS cnt FROM documents")
-            doc_count = c.fetchone()["cnt"]
-            
-            # 检查queries表是否为空
-            c.execute("SELECT COUNT(*) AS cnt FROM queries")
-            q_count = c.fetchone()["cnt"]
-            
-            # 如果两个表都是空的，就导入数据
-            if doc_count == 0 and q_count == 0:
-                print("数据库表为空，准备导入数据...")
-                
-                # 检查CSV文件是否存在
-                if os.path.exists('selected_docs.csv'):
-                    try:
-                        print("开始读取CSV文件...")
-                        # 读取CSV文件，使用分块读取以减少内存使用
-                        # 首先读取标题行，检查列是否存在
-                        df_header = pd.read_csv('selected_docs.csv', nrows=0)
-                        
-                        # 检查必要的列是否存在
-                        required_columns = ['qid', 'query', 'docno', 'text']
-                        missing_columns = [col for col in required_columns if col not in df_header.columns]
-                        
-                        if missing_columns:
-                            print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
-                        else:
-                            # 使用分块读取CSV并处理
-                            chunk_size = 50000  # 每次读取的行数
-                            reader = pd.read_csv('selected_docs.csv', chunksize=chunk_size)
-                            
-                            # 计算总行数（可选，需要遍历一遍文件）
-                            total_rows = sum(1 for _ in open('selected_docs.csv', 'r')) - 1  # 减去标题行
-                            print(f"CSV文件共有约 {total_rows} 行数据")
-                            
-                            chunk_count = 0
-                            for chunk in reader:
-                                chunk_count += 1
-                                print(f"处理CSV分块 {chunk_count}，包含 {len(chunk)} 行...")
-                                
-                                # 导入数据到数据库
-                                import_df_to_database(chunk)
-                                
-                            print(f"成功完成从 selected_docs.csv 的数据导入，共处理了 {chunk_count} 个分块")
-                    except Exception as e:
-                        print(f"导入数据时出错: {e}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print("没有找到 selected_docs.csv 文件，跳过导入")
-            else:
-                print(f"数据库表不为空 (documents: {doc_count}, queries: {q_count})，跳过导入")
-    except Exception as e:
-        print(f"检查数据库状态时出错: {e}")
+        conn.rollback()
     finally:
         conn.close()
 
-# 确保初始化数据库
+# 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
+
+try:
+    # 读取CSV文件
+    df = pd.read_csv("selected_docs.csv")
     
-# 检查是否需要导入数据
-check_and_import()
+    # 检查必要的列是否存在
+    required_columns = ['qid', 'query', 'docno', 'text']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
+    else:
+        # 检查表是否为空
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                # 检查documents表是否为空
+                c.execute("SELECT COUNT(*) AS cnt FROM documents")
+                doc_count = c.fetchone()["cnt"]
+                
+                # 检查queries表是否为空
+                c.execute("SELECT COUNT(*) AS cnt FROM queries")
+                q_count = c.fetchone()["cnt"]
+                
+                # 只有在两个表都为空的情况下才导入数据
+                if doc_count == 0 and q_count == 0:
+                    print("数据库表为空，开始导入数据...")
+                    # 导入数据到数据库
+                    import_df_to_database(df)
+                    print(f"成功从 selected_docs.csv 导入数据")
+                else:
+                    print(f"数据库表不为空 (documents: {doc_count}, queries: {q_count})，跳过导入")
+        finally:
+            conn.close()
+except Exception as e:
+    print(f"导入数据时出错: {e}")
 
 if __name__ == '__main__':
-    # 如果需要增加超时设置，建议在启动命令中使用：
-    # gunicorn --timeout 300 --workers 4 app:app
     app.run(host="0.0.0.0", port=5000)
