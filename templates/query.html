@@ -195,7 +195,7 @@
     </div>
   </div>
 
-  <!-- 机器人验证模态框 -->
+  <!-- 机器人验证模态框 - 注意这里使用query_position -->
   {% if query_position == 1 %}
   <div id="botModal" class="modal">
     <div class="modal-content">
@@ -207,6 +207,8 @@
     </div>
   </div>
   {% endif %}
+
+<!-- 注意力检查模态框和文档扩展模态框保持不变 -->
 
   <!-- 注意力检查模态框 -->
   <div id="attentionModal" class="modal">
@@ -433,36 +435,66 @@
       window.location.href = "/pause?query=" + currentPosition;
     }
 
-    // Bot Detection (only for query 1)
-    {% if query_id == 1 %}
+    // Bot检测 - 使用查询位置和首次访问标志
+    console.debug("Checking bot detection, query position =", currentPosition);
+    {% if query_position == 1 %}
+      console.debug("Bot detection should be active");
+      
+      // 如果是首次访问，确保重置botChecked
+      {% if is_first_visit %}
+        console.debug("First visit to this query, resetting bot verification");
+        sessionStorage.removeItem("botChecked");
+      {% endif %}
+      
       let botThreshold = Math.floor(Math.random() * 99) + 1;
-      document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
-      if (sessionStorage.getItem("botChecked") === "true") {
-        document.getElementById("botModal").style.display = "none";
-        lastEventTime = Date.now();
-      } else {
-        document.getElementById("botModal").style.display = "block";
-      }
+      console.debug("Bot threshold set to:", botThreshold);
       
-      let botDetectionStart = Date.now();
-      const botSlider = document.getElementById("botSlider");
-      const sliderValueLabel = document.getElementById("sliderValue");
-      
-      botSlider.addEventListener("input", function(){
-        sliderValueLabel.textContent = botSlider.value;
-      });
-      
-      document.getElementById("botVerify").addEventListener("click", function(){
-        if (parseInt(botSlider.value) >= botThreshold) {
-          let botDetectionDuration = Date.now() - botDetectionStart;
-          logEvent({ eventType: "BOT_DETECTION", passFlag: 1 });
-          sessionStorage.setItem("botChecked", "true");
+      // 确保元素存在后再操作
+      if (document.getElementById("botText") && document.getElementById("botModal")) {
+        document.getElementById("botText").innerText = "Please slide the slider to at least " + botThreshold + " to confirm you are human.";
+        
+        // 检查会话存储中的验证状态
+        if (sessionStorage.getItem("botChecked") === "true") {
+          console.debug("User already verified, hiding bot modal");
           document.getElementById("botModal").style.display = "none";
           lastEventTime = Date.now();
         } else {
-          alert("Please slide the slider further (at least to " + botThreshold + ") to verify you are human.");
+          console.debug("User not verified, showing bot modal");
+          document.getElementById("botModal").style.display = "block";
         }
-      });
+        
+        let botDetectionStart = Date.now();
+        const botSlider = document.getElementById("botSlider");
+        const sliderValueLabel = document.getElementById("sliderValue");
+        
+        if (botSlider && sliderValueLabel) {
+          botSlider.addEventListener("input", function(){
+            sliderValueLabel.textContent = botSlider.value;
+          });
+        }
+        
+        if (document.getElementById("botVerify")) {
+          document.getElementById("botVerify").addEventListener("click", function(){
+            if (parseInt(botSlider.value) >= botThreshold) {
+              let botDetectionDuration = Date.now() - botDetectionStart;
+              logEvent({ 
+                eventType: "BOT_DETECTION", 
+                passFlag: 1,
+                duration: botDetectionDuration
+              });
+              sessionStorage.setItem("botChecked", "true");
+              document.getElementById("botModal").style.display = "none";
+              lastEventTime = Date.now();
+            } else {
+              alert("Please slide the slider further (at least to " + botThreshold + ") to verify you are human.");
+            }
+          });
+        }
+      } else {
+        console.error("Bot detection elements not found in DOM");
+      }
+    {% else %}
+      console.debug("Bot detection not active for this query position");
     {% endif %}
 
     // 注意力检查

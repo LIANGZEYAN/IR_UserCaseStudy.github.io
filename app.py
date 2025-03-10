@@ -128,6 +128,8 @@ def init_db():
 
 # ------------------ 4) 路由逻辑 ------------------
 
+AVAILABLE_QUERY_IDS = []
+
 def get_available_query_ids():
     """
     从数据库获取所有可用的查询ID
@@ -145,9 +147,6 @@ def get_available_query_ids():
     except Exception as e:
         print(f"ERROR: Failed to get available query IDs: {str(e)}")
     return query_ids
-
-# 增加一个全局变量来缓存查询ID列表
-AVAILABLE_QUERY_IDS = []
 
 # 在应用启动时加载查询ID列表
 @app.before_first_request
@@ -218,6 +217,16 @@ def query_page(query_position):
     
     user_id = session["user_id"]
     print(f"DEBUG: Processing query_page for user_id={user_id}, query_position={query_position}, query_id={query_id}")
+    
+    # 记录用户首次访问某个查询的时间
+    is_first_visit = False
+    if "visited_positions" not in session:
+        session["visited_positions"] = []
+        
+    if query_position not in session["visited_positions"]:
+        session["visited_positions"].append(query_position)
+        is_first_visit = True
+        print(f"DEBUG: First visit to query position {query_position} for user {user_id}")
 
     if request.method == "POST":
         if query_position < len(AVAILABLE_QUERY_IDS):
@@ -225,7 +234,6 @@ def query_page(query_position):
         else:
             return redirect(url_for("thanks"))
 
-    # 以下代码与原来相同，但使用正确的query_id
     # 默认值
     query_content = f"Query {query_id} (No data available)"
     docs = []
@@ -335,7 +343,8 @@ def query_page(query_position):
         query_position=query_position,  # 位置(1,2,3)
         total_queries=len(AVAILABLE_QUERY_IDS),  # 总查询数
         docs=docs, 
-        query_content=query_content
+        query_content=query_content,
+        is_first_visit=is_first_visit  # 是否首次访问此查询
     )
 
 @app.route("/thanks")
