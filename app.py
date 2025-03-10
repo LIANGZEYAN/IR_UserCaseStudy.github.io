@@ -353,24 +353,52 @@ def insert_documents_from_df(df):
         conn.close()
 
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
-init_db()
+def check_and_import():
+    """检查表是否为空，如果为空就导入数据"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 检查documents表是否为空
+            c.execute("SELECT COUNT(*) AS cnt FROM documents")
+            doc_count = c.fetchone()["cnt"]
+            
+            # 检查queries表是否为空
+            c.execute("SELECT COUNT(*) AS cnt FROM queries")
+            q_count = c.fetchone()["cnt"]
+            
+            # 如果两个表都是空的，就导入数据
+            if doc_count == 0 and q_count == 0:
+                print("数据库表为空，尝试导入数据...")
+                
+                # 检查CSV文件是否存在
+                if os.path.exists('selected_docs.csv'):
+                    try:
+                        # 读取CSV文件
+                        df = pd.read_csv('selected_docs.csv')
+                        
+                        # 检查必要的列是否存在
+                        required_columns = ['qid', 'query', 'docno', 'text']
+                        missing_columns = [col for col in required_columns if col not in df.columns]
+                        
+                        if missing_columns:
+                            print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
+                        else:
+                            # 导入数据到数据库
+                            import_df_to_database(df)
+                            print(f"成功从 selected_docs.csv 导入数据")
+                    except Exception as e:
+                        print(f"导入数据时出错: {e}")
+                else:
+                    print("没有找到 selected_docs.csv 文件，跳过导入")
+            else:
+                print(f"数据库表不为空 (documents: {doc_count}, queries: {q_count})，跳过导入")
+    finally:
+        conn.close()
 
-try:
-    # 读取CSV文件
-    df = pd.read_csv("selected_docs.csv")
+init_db()
     
-    # 检查必要的列是否存在
-    required_columns = ['qid', 'query', 'docno', 'text']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
-    else:
-        # 导入数据到数据库
-        import_df_to_database(df)
-        print(f"成功从 selected_docs.csv 导入数据")
-except Exception as e:
-    print(f"导入数据时出错: {e}")
+# 检查是否需要导入数据
+check_and_import()
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
