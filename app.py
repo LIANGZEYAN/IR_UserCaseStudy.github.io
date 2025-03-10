@@ -366,28 +366,9 @@ try:
     if missing_columns:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
-        # 检查表是否为空
-        conn = get_connection()
-        try:
-            with conn.cursor() as c:
-                # 检查documents表是否为空
-                c.execute("SELECT COUNT(*) AS cnt FROM documents")
-                doc_count = c.fetchone()["cnt"]
-                
-                # 检查queries表是否为空
-                c.execute("SELECT COUNT(*) AS cnt FROM queries")
-                q_count = c.fetchone()["cnt"]
-                
-                # 只有在两个表都为空的情况下才导入数据
-                if doc_count == 0 and q_count == 0:
-                    print("数据库表为空，开始导入数据...")
-                    # 导入数据到数据库
-                    import_df_to_database(df)
-                    print(f"成功从 selected_docs.csv 导入数据")
-                else:
-                    print(f"数据库表不为空 (documents: {doc_count}, queries: {q_count})，跳过导入")
-        finally:
-            conn.close()
+        # 导入数据到数据库
+        import_df_to_database(df)
+        print(f"成功从 selected_docs.csv 导入数据")
 except Exception as e:
     print(f"导入数据时出错: {e}")
 
