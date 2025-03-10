@@ -154,8 +154,11 @@ def query_page(query_id):
     4) queries 表里取出 query 内容(若有), 传给模板。
     """
     if "user_id" not in session:
+        print("ERROR: No user_id in session, redirecting to index")
         return redirect(url_for("index"))
+    
     user_id = session["user_id"]
+    print(f"DEBUG: Processing query_page for user_id={user_id}, query_id={query_id}")
 
     if request.method == "POST":
         if query_id < 3:
@@ -163,83 +166,163 @@ def query_page(query_id):
         else:
             return redirect(url_for("thanks"))
 
+    # 默认值，以防查询失败
+    query_content = f"Query {query_id} (No data available)"
+    docs = []
+    
     try:
         conn = get_connection()
         try:
             with conn.cursor() as c:
-                # 先从 queries 表获取此 query 的内容
+                # 1. 查询内容
                 c.execute("SELECT content FROM queries WHERE id=%s", (query_id,))
                 row_q = c.fetchone()
-                if row_q:
+                if row_q and row_q["content"]:
                     query_content = row_q["content"]
+                    print(f"DEBUG: Found query content: '{query_content}'")
                 else:
-                    query_content = f"Query {query_id} (No data)"
+                    print(f"DEBUG: No query content found for query_id={query_id}")
 
-                # 再看 orders 表有没有记录
+                # 2. 文档顺序
                 c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
                 row_o = c.fetchone()
-                if row_o:
-                    # 已有顺序
+                if row_o and row_o["doc_order"]:
+                    # 已有顺序，解析字符串为文档ID列表
                     doc_order_str = row_o["doc_order"]
-                    doc_order = [int(x) for x in doc_order_str.split(",")]
+                    try:
+                        doc_order = [int(x) for x in doc_order_str.split(",") if x.strip()]
+                        print(f"DEBUG: Found existing doc_order: {doc_order}")
+                    except ValueError as e:
+                        print(f"ERROR: Failed to parse doc_order '{doc_order_str}': {str(e)}")
+                        doc_order = []
                 else:
-                    # 第一次 -> 生成 doc_order
-                    # 修改: 使用id排序代替docno排序，这样更可靠
+                    # 生成新的顺序
+                    print(f"DEBUG: No existing doc_order, generating new one")
                     c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
                     raw_docnos = [r["id"] for r in c.fetchall()]
+                    print(f"DEBUG: Retrieved raw_docnos: {raw_docnos}, length: {len(raw_docnos)}")
                     
                     if not raw_docnos:
-                        # 如果没有文档，返回空列表
+                        print(f"WARNING: No documents found for query_id={query_id}")
                         doc_order = []
                     else:
-                        # 保证至少有9个文档可用
+                        # 处理文档数量
                         if len(raw_docnos) >= 9:
                             # 计算 row_index
                             row_index = (abs(hash(user_id)) + query_id) % 9
+                            print(f"DEBUG: Using Latin square row_index={row_index}")
                             # 取拉丁方的一行
                             perm = LATIN_9x9[row_index]
+                            print(f"DEBUG: Selected permutation: perm={perm}")
                             
-                            # 安全地重排文档
-                            doc_order = []
-                            for i in range(9):
-                                idx = perm[i] - 1
-                                if 0 <= idx < len(raw_docnos):  # 安全检查
-                                    doc_order.append(raw_docnos[idx])
+                            try:
+                                # 安全地重排文档
+                                doc_order = []
+                                for i in range(min(9, len(raw_docnos))):
+                                    idx = perm[i] - 1
+                                    if 0 <= idx < len(raw_docnos):  # 安全检查
+                                        doc_order.append(raw_docnos[idx])
+                                print(f"DEBUG: Generated doc_order={doc_order}")
+                            except Exception as e:
+                                print(f"ERROR: Failed to generate doc_order: {str(e)}")
+                                doc_order = raw_docnos[:min(9, len(raw_docnos))]
                         else:
-                            # 文档不足9个
-                            print(f"警告: 查询ID {query_id} 只有 {len(raw_docnos)} 个文档，少于所需的9个")
+                            print(f"WARNING: Only {len(raw_docnos)} documents found for query_id={query_id}, expected at least 9")
                             doc_order = raw_docnos.copy()
                     
-                    # 存到 orders 表
+                    # 如果生成了文档顺序，存入orders表
                     if doc_order:
                         doc_order_str = ",".join(str(x) for x in doc_order)
-                        c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
-                                (user_id, query_id, doc_order_str))
-                        conn.commit()
+                        try:
+                            c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
+                                    (user_id, query_id, doc_order_str))
+                            conn.commit()
+                            print(f"DEBUG: Inserted doc_order into orders table")
+                        except Exception as e:
+                            print(f"ERROR: Failed to insert doc_order: {str(e)}")
+                            conn.rollback()
+                    else:
+                        print(f"WARNING: Empty doc_order, not inserting into orders table")
 
-                # 根据 doc_order 获取文档详情
+                # 3. 获取文档详情
                 if doc_order:
-                    placeholders = ",".join(["%s"] * len(doc_order))
-                    sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
-                    params = [query_id] + doc_order
-                    c.execute(sql, params)
-                    rows = c.fetchall()
-                    # 需手动按 doc_order 排序
-                    doc_map = {r["id"]: r for r in rows}
-                    docs = [doc_map[d] for d in doc_order if d in doc_map]
+                    try:
+                        placeholders = ",".join(["%s"] * len(doc_order))
+                        sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
+                        params = [query_id] + doc_order
+                        print(f"DEBUG: Executing SQL: {sql}")
+                        print(f"DEBUG: SQL params: {params}")
+                        c.execute(sql, params)
+                        rows = c.fetchall()
+                        print(f"DEBUG: Retrieved {len(rows)} documents")
+                        
+                        # 需手动按 doc_order 排序
+                        doc_map = {r["id"]: r for r in rows}
+                        docs = []
+                        for d in doc_order:
+                            if d in doc_map:
+                                # 确保所有字段存在且格式正确
+                                doc = doc_map[d]
+                                # 确保docno是字符串类型
+                                if "docno" in doc and doc["docno"] is not None:
+                                    doc["docno"] = str(doc["docno"])
+                                else:
+                                    doc["docno"] = str(doc["id"]) # 如果docno为空，使用id作为替代
+                                
+                                # 确保content字段存在
+                                if "content" not in doc or doc["content"] is None:
+                                    doc["content"] = "文档内容不可用"
+                                
+                                docs.append(doc)
+                        
+                        print(f"DEBUG: Final docs list has {len(docs)} documents")
+                        # 打印每个文档的基本信息
+                        for i, doc in enumerate(docs):
+                            print(f"DEBUG: Doc {i+1} - id: {doc['id']}, docno: {doc['docno']}, content length: {len(doc['content']) if 'content' in doc and doc['content'] else 0}")
+                    except Exception as e:
+                        print(f"ERROR: Failed to retrieve document details: {str(e)}")
                 else:
-                    docs = []
-
+                    print(f"WARNING: Empty doc_order, no documents to retrieve")
         finally:
             conn.close()
+            
+        # 最终检查传递给模板的数据
+        print(f"DEBUG: Sending to template - query_id: {query_id}, query_content: '{query_content}', docs count: {len(docs)}")
+        
     except Exception as e:
         import traceback
         print(f"ERROR in query_page: {str(e)}")
         print(traceback.format_exc())
+    
+    # 添加对模板数据的清理和转换
+    # 1. 确保查询内容非空
+    if not query_content:
+        query_content = f"Query {query_id} (No content available)"
+    
+    # 2. 确保docs是一个列表且每个文档都有必要的字段
+    if not isinstance(docs, list):
         docs = []
-        query_content = f"系统暂时遇到问题，请稍后再试。"
+    
+    # 3. 文档内容的最终检查
+    clean_docs = []
+    for doc in docs:
+        if isinstance(doc, dict):
+            clean_doc = {
+                "id": doc.get("id", 0),
+                "docno": str(doc.get("docno", "")),
+                "content": doc.get("content", "文档内容不可用")
+            }
+            clean_docs.append(clean_doc)
+    
+    # 如果仍然没有文档，可以添加一个占位符（调试用）
+    if not clean_docs and app.config.get("DEBUG", False):
+        clean_docs = [{
+            "id": 999,
+            "docno": "placeholder",
+            "content": "This is a placeholder document for testing. If you see this, it means no real documents were retrieved from the database."
+        }]
 
-    return render_template("query.html", query_id=query_id, docs=docs, query_content=query_content)
+    return render_template("query.html", query_id=query_id, docs=clean_docs, query_content=query_content)
 
 @app.route("/thanks")
 def thanks():

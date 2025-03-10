@@ -125,25 +125,67 @@
       white-space: pre-wrap;
       user-select: text !important;
     }
+    .debug-panel {
+      background-color: #f8f9fa;
+      padding: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #ddd;
+      display: none;
+    }
+    .debug-btn {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      z-index: 1000;
+      opacity: 0.5;
+      background-color: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
+  <!-- 调试面板 - 默认隐藏 -->
+  <div class="debug-panel" id="debugInfo">
+    <h3>调试信息</h3>
+    <p>Query ID: {{ query_id }}</p>
+    <p>Query Content: {{ query_content }}</p>
+    <p>Documents: {{ docs|length }} 个</p>
+    <button onclick="document.getElementById('debugData').style.display = document.getElementById('debugData').style.display === 'none' ? 'block' : 'none';">
+      显示/隐藏详细数据
+    </button>
+    <div id="debugData" style="display: none;">
+      <pre>{{ docs|tojson }}</pre>
+    </div>
+  </div>
+
   <div class="container">
     <button class="pause-btn" onclick="pauseSurvey()">Pause</button>
     <div class="progress">Progress: Query {{ query_id }} of 3</div>
     <h2>{{ query_content }}</h2>
     <p>Task: Please select any document relevant to the query above. To explain your choice, click a document to enlarge it and select the passage that supports your decision.</p>
     
+    <!-- 文档网格 -->
     <div class="grid-container">
-      {% for doc in docs %}
-        <div class="grid-item"
-             data-docno="{{ doc.docno }}"
-             data-fulltext="{{ doc.content|e }}"
-             onclick="openEnlargeModal(this)">
-          <p class="doc-content">{{ doc.content }}</p>
+      {% if docs and docs|length > 0 %}
+        {% for doc in docs %}
+          <div class="grid-item"
+               data-docno="{{ doc.docno|string }}"
+               data-fulltext="{{ doc.content|e if doc.content else '文档内容为空'|e }}"
+               onclick="openEnlargeModal(this)">
+            <p class="doc-content">{{ doc.content|truncate(200) if doc.content else '文档内容为空' }}</p>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div style="grid-column: span 3; text-align: center; padding: 50px 0;">
+          <p>未找到与此查询相关的文档。</p>
         </div>
-      {% endfor %}
+      {% endif %}
     </div>
+    
     <div style="text-align: center;">
       {% if query_id > 1 %}
       <button class="nav-btn" onclick="goBack()">Back</button>
@@ -152,6 +194,7 @@
     </div>
   </div>
 
+  <!-- 机器人验证模态框 -->
   {% if query_id == 1 %}
   <div id="botModal" class="modal">
     <div class="modal-content">
@@ -164,6 +207,7 @@
   </div>
   {% endif %}
 
+  <!-- 注意力检查模态框 -->
   <div id="attentionModal" class="modal">
     <div class="modal-content">
       <h2>Attention Check</h2>
@@ -173,6 +217,7 @@
     </div>
   </div>
 
+  <!-- 文档扩展模态框 -->
   <div id="enlargeModal" class="modal">
     <div class="modal-content">
       <h2>Document Passage Selection</h2>
@@ -184,30 +229,54 @@
     </div>
   </div>
 
+  <!-- 调试按钮 -->
+  <button class="debug-btn" onclick="document.getElementById('debugInfo').style.display = 'block';">Debug</button>
+
   <script>
-    // 全局变量：确保 query_id 正确注入
+    // 全局变量
     let currentQid = {{ query_id | default(1) }};
     console.debug("Current Qid:", currentQid);
     let userId = "{{ session['user_id'] }}";
     let lastEventTime = Date.now();
-    let currentDocno = 0;
+    let currentDocno = null;
 
-    // 恢复页面状态：从 sessionStorage 读取选中的 docno 和 passage 高亮
+    // 页面加载时恢复状态
     document.addEventListener("DOMContentLoaded", function() {
-      let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-      let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
-      document.querySelectorAll(".grid-item").forEach(item => {
-        let docno = parseInt(item.getAttribute("data-docno"), 10);
-        if (selectedDocs.indexOf(docno) !== -1) {
-          item.classList.add("selected");
-          if (passageHighlights[docno]) {
-            item.querySelector(".doc-content").innerHTML = passageHighlights[docno];
+      console.debug("DOM loaded, restoring state...");
+      try {
+        let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
+        let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
+        
+        console.debug("Restoring selected docs:", selectedDocs);
+        console.debug("Restoring highlights:", passageHighlights);
+        
+        document.querySelectorAll(".grid-item").forEach(item => {
+          let docnoStr = item.getAttribute("data-docno");
+          console.debug("Processing grid item with docno:", docnoStr);
+          
+          // 尝试将selectedDocs中的项转换为字符串以匹配
+          let found = false;
+          for (let i = 0; i < selectedDocs.length; i++) {
+            if (String(selectedDocs[i]) === docnoStr) {
+              found = true;
+              break;
+            }
           }
-        }
-      });
+          
+          if (found) {
+            console.debug("Found selected doc:", docnoStr);
+            item.classList.add("selected");
+            if (passageHighlights[docnoStr]) {
+              item.querySelector(".doc-content").innerHTML = passageHighlights[docnoStr];
+            }
+          }
+        });
+      } catch (e) {
+        console.error("Error restoring state:", e);
+      }
     });
 
-    // 统一的 logEvent 函数：发送 userId, qid, docno, eventType, startIndex, endIndex, duration, passFlag
+    // 记录事件的函数
     function logEvent({
       docno = 0,
       eventType = "",
@@ -241,17 +310,23 @@
 
     // 打开或取消选中文档
     function openEnlargeModal(element) {
-      let docno = parseInt(element.getAttribute('data-docno'), 10);
+      let docnoStr = element.getAttribute('data-docno');
+      let docno = docnoStr;
+      
+      // 保存原始docno字符串
+      console.debug("Processing document with docno:", docno);
+      
       if (element.classList.contains('selected')) {
+        // 取消选中文档
         element.classList.remove('selected');
-        // 更新 sessionStorage：移除该 docno
         let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-        selectedDocs = selectedDocs.filter(n => n !== docno);
+        selectedDocs = selectedDocs.filter(n => String(n) !== String(docno));
         sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
         logEvent({ docno: docno, eventType: "UNSELECT" });
         let originalText = element.getAttribute('data-fulltext');
         element.querySelector(".doc-content").innerText = originalText;
       } else {
+        // 打开文档扩展模态框
         currentDocno = docno;
         let fullText = element.getAttribute('data-fulltext');
         logEvent({ docno: docno, eventType: "OPEN_DOC" });
@@ -260,34 +335,43 @@
       }
     }
 
+    // 取消文档段落选择
     function cancelPassageSelection() {
       logEvent({ docno: currentDocno, eventType: "CANCEL_DOC" });
       document.getElementById("enlargeModal").style.display = "none";
     }
 
+    // 提交文档段落选择
     function submitPassageSelection() {
       let enlargeDocElem = document.getElementById("enlargeDoc");
       let rawFullText = enlargeDocElem.innerText;
       let rawSelectedText = window.getSelection().toString();
-      console.debug("Raw full text:", rawFullText);
+      
+      console.debug("Raw full text length:", rawFullText.length);
       console.debug("Raw selected text:", rawSelectedText);
+      
       if (!rawSelectedText.trim()) {
         alert("Please select a portion of the text before submitting.");
         return;
       }
+      
       // 为减少因换行空格差异导致匹配失败，统一处理空白
       function unifyWhitespace(str) {
         return str.replace(/\r/g, "").replace(/\s+/g, " ").trim();
       }
+      
       let cleanFullText = unifyWhitespace(rawFullText);
       let cleanSelected = unifyWhitespace(rawSelectedText);
-      console.debug("Clean full text:", cleanFullText);
-      console.debug("Clean selected:", cleanSelected);
+      
+      console.debug("Clean full text length:", cleanFullText.length);
+      console.debug("Clean selected text:", cleanSelected);
+      
       let startIndex = cleanFullText.indexOf(cleanSelected);
       if (startIndex === -1) {
         alert("Could not find the selected text in the document. Try selecting again.");
         return;
       }
+      
       let endIndex = startIndex + cleanSelected.length;
       logEvent({
         docno: currentDocno,
@@ -295,26 +379,32 @@
         startIndex: startIndex,
         endIndex: endIndex
       });
+      
       // 保存状态到 sessionStorage
       let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-      if (selectedDocs.indexOf(currentDocno) === -1) {
+      if (!selectedDocs.includes(currentDocno)) {
         selectedDocs.push(currentDocno);
         sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
       }
+      
       let highlighted = rawFullText.substring(0, startIndex)
                        + "<mark>" + rawFullText.substring(startIndex, endIndex) + "</mark>"
                        + rawFullText.substring(endIndex);
+                       
       let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
       passageHighlights[currentDocno] = highlighted;
       sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
+      
       let item = document.querySelector('.grid-item[data-docno="' + currentDocno + '"]');
       if (item) {
         item.classList.add('selected');
         item.querySelector(".doc-content").innerHTML = highlighted;
       }
+      
       document.getElementById("enlargeModal").style.display = "none";
     }
 
+    // 页面导航
     function navigatePage(target) {
       logEvent({ eventType: "PAGE_NAV" });
       if (target === 'next') {
@@ -323,12 +413,15 @@
         window.location.href = "/query/" + (currentQid - 1);
       }
     }
+    
     function submitQuery() {
       navigatePage('next');
     }
+    
     function goBack() {
       navigatePage('back');
     }
+    
     function pauseSurvey() {
       logEvent({ eventType: "PAGE_NAV" });
       window.location.href = "/pause?query=" + currentQid;
@@ -344,12 +437,15 @@
       } else {
         document.getElementById("botModal").style.display = "block";
       }
+      
       let botDetectionStart = Date.now();
       const botSlider = document.getElementById("botSlider");
       const sliderValueLabel = document.getElementById("sliderValue");
+      
       botSlider.addEventListener("input", function(){
         sliderValueLabel.textContent = botSlider.value;
       });
+      
       document.getElementById("botVerify").addEventListener("click", function(){
         if (parseInt(botSlider.value) >= botThreshold) {
           let botDetectionDuration = Date.now() - botDetectionStart;
@@ -363,7 +459,7 @@
       });
     {% endif %}
 
-    // Random Attention Check
+    // 注意力检查
     const attentionChecks = [
       { question: "Please answer: What is your favorite color? (Answer 'Navy')", correctAnswer: "Navy" },
       { question: "Type the word 'Banana' exactly as shown.", correctAnswer: "Banana" },
@@ -376,6 +472,7 @@
       { question: "If you read instructions, type 'Confirmed'.", correctAnswer: "Confirmed" },
       { question: "If paying attention, answer 'Verified'.", correctAnswer: "Verified" }
     ];
+    
     function showAttentionCheck() {
       let randomIndex = Math.floor(Math.random() * attentionChecks.length);
       let selectedCheck = attentionChecks[randomIndex];
@@ -384,9 +481,11 @@
       document.getElementById("attentionModal").setAttribute("data-correct", selectedCheck.correctAnswer);
       document.getElementById("attentionModal").style.display = "block";
     }
+    
     setTimeout(function(){
       showAttentionCheck();
     }, 120000);
+    
     document.getElementById("attentionSubmit").addEventListener("click", function(){
       let userAnswer = document.getElementById("attentionAnswer").value.trim();
       let correctAnswer = document.getElementById("attentionModal").getAttribute("data-correct");
