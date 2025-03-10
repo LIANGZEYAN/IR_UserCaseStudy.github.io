@@ -3,6 +3,7 @@ import pymysql
 import os
 from datetime import datetime
 from urllib.parse import urlparse
+import pandas as pd
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
