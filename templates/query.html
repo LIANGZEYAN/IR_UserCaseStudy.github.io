@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Survey Query {{ query_id }}</title>
+  <title>Survey Query {{ query_position }}</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -148,10 +148,11 @@
   </style>
 </head>
 <body>
-  <!-- 调试面板 - 默认隐藏 -->
-  <div class="debug-panel" id="debugInfo">
+  <!-- 调试面板 -->
+  <div class="debug-panel" id="debugInfo" style="display: none;">
     <h3>调试信息</h3>
-    <p>Query ID: {{ query_id }}</p>
+    <p>Query Position: {{ query_position }}</p>
+    <p>Query ID (Database): {{ query_id }}</p>
     <p>Query Content: {{ query_content }}</p>
     <p>Documents: {{ docs|length }} 个</p>
     <button onclick="document.getElementById('debugData').style.display = document.getElementById('debugData').style.display === 'none' ? 'block' : 'none';">
@@ -164,7 +165,7 @@
 
   <div class="container">
     <button class="pause-btn" onclick="pauseSurvey()">Pause</button>
-    <div class="progress">Progress: Query {{ query_id }} of 3</div>
+    <div class="progress">Progress: Query {{ query_position }} of {{ total_queries }}</div>
     <h2>{{ query_content }}</h2>
     <p>Task: Please select any document relevant to the query above. To explain your choice, click a document to enlarge it and select the passage that supports your decision.</p>
     
@@ -185,9 +186,9 @@
         </div>
       {% endif %}
     </div>
-    
+
     <div style="text-align: center;">
-      {% if query_id > 1 %}
+      {% if query_position > 1 %}
       <button class="nav-btn" onclick="goBack()">Back</button>
       {% endif %}
       <button class="nav-btn" onclick="submitQuery()">Next</button>
@@ -195,7 +196,7 @@
   </div>
 
   <!-- 机器人验证模态框 -->
-  {% if query_id == 1 %}
+  {% if query_position == 1 %}
   <div id="botModal" class="modal">
     <div class="modal-content">
       <h2>Bot Verification</h2>
@@ -230,12 +231,15 @@
   </div>
 
   <!-- 调试按钮 -->
-  <button class="debug-btn" onclick="document.getElementById('debugInfo').style.display = 'block';">Debug</button>
+  <button onclick="document.getElementById('debugInfo').style.display = 'block';" 
+          style="position: fixed; bottom: 10px; right: 10px; z-index: 1000; opacity: 0.5;">Debug</button>
 
   <script>
-    // 全局变量
-    let currentQid = {{ query_id | default(1) }};
-    console.debug("Current Qid:", currentQid);
+    // 更新全局变量，使用查询位置和ID
+    let currentQid = {{ query_id }};  // 数据库中的真实查询ID
+    let currentPosition = {{ query_position }};  // 查询位置（1, 2, 3...）
+    let totalQueries = {{ total_queries }};  // 总查询数
+    console.debug("Current Position:", currentPosition, "Current Qid (DB):", currentQid);
     let userId = "{{ session['user_id'] }}";
     let lastEventTime = Date.now();
     let currentDocno = null;
@@ -404,13 +408,15 @@
       document.getElementById("enlargeModal").style.display = "none";
     }
 
-    // 页面导航
+    // 页面导航函数需要修改，使用查询位置
     function navigatePage(target) {
       logEvent({ eventType: "PAGE_NAV" });
       if (target === 'next') {
-        window.location.href = currentQid < 3 ? "/query/" + (currentQid + 1) : "/thanks";
+        window.location.href = currentPosition < totalQueries 
+          ? "/query/" + (currentPosition + 1) 
+          : "/thanks";
       } else {
-        window.location.href = "/query/" + (currentQid - 1);
+        window.location.href = "/query/" + (currentPosition - 1);
       }
     }
     
@@ -424,7 +430,7 @@
     
     function pauseSurvey() {
       logEvent({ eventType: "PAGE_NAV" });
-      window.location.href = "/pause?query=" + currentQid;
+      window.location.href = "/pause?query=" + currentPosition;
     }
 
     // Bot Detection (only for query 1)
