@@ -503,6 +503,37 @@ def insert_documents_from_df(df):
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
 
+def clear_documents_table():
+    """清空documents表中的所有记录"""
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                # 获取当前记录数
+                c.execute("SELECT COUNT(*) AS count FROM documents")
+                result = c.fetchone()
+                document_count = result['count'] if result else 0
+                
+                # 执行删除操作
+                c.execute("DELETE FROM documents")
+                
+                # 提交事务
+                conn.commit()
+                
+                print(f"已清空documents表，删除了{document_count}条记录")
+                return True
+        except Exception as e:
+            conn.rollback()  # 出错时回滚
+            print(f"清空documents表时出错: {e}")
+            return False
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"连接数据库时出错: {e}")
+        return False
+        
+clear_documents_table()
+
 try:
     # 读取CSV文件
     df = pd.read_csv("selected_docs.csv")
