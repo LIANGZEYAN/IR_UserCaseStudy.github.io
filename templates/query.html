@@ -177,7 +177,7 @@
                data-docno="{{ doc.docno|string }}"
                data-fulltext="{{ doc.content|e if doc.content else '文档内容为空'|e }}"
                onclick="openEnlargeModal(this)">
-            <p class="doc-content">{{ doc.content|truncate(200) if doc.content else '文档内容为空' }}</p>
+            <p class="doc-content">{{ doc.content|truncate(500) if doc.content else '文档内容为空' }}</p>
           </div>
         {% endfor %}
       {% else %}
