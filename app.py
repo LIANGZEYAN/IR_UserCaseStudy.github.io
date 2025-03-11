@@ -4,28 +4,48 @@ import os
 from datetime import datetime
 from urllib.parse import urlparse
 import pandas as pd
+from itertools import permutations
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
-# ------------------ 1) 拉丁方 (循环移位) 生成 ------------------
-def generate_latin_square_cyclic(N):
+# ------------------ 1) 拉丁方生成 ------------------
+def generate_latin_square(N):
     """
-    生成一个 N×N 的拉丁方 (循环移位)。
-    row[i][j] = (i + j) % N + 1
+    生成一个 N×N 的拉丁方，每行都是完全不同的排列。
     """
+    
+    # 基础行 (1,2,...,N)
+    base_row = list(range(1, N+1))
+    
+    # 获取所有可能的排列
+    all_permutations = list(permutations(base_row))
+    
+    # 选择N个互不相同的排列
     square = []
     for i in range(N):
-        row = []
-        for j in range(N):
-            val = (i + j) % N + 1
-            row.append(val)
-        square.append(row)
+        # 使用固定的算法选择排列，确保每次选择的都不同
+        square.append(list(all_permutations[i * (len(all_permutations) // N)]))
+    
     return square
 
 # 预先生成一个 9×9 的拉丁方，用于9篇文档的排列
-LATIN_9x9 = generate_latin_square_cyclic(9)
+LATIN_9x9 = generate_latin_square(9)
 
+# ------------------ 2) 用户-行映射函数 ------------------
+def get_user_row_index(user_id, total_rows=9):
+    """
+    基于用户ID确定性地分配拉丁方行索引
+    """
+    # 确保用户ID是字符串
+    user_id_str = str(user_id)
+    
+    # 使用更好的哈希函数 - 位置加权字符哈希
+    hash_value = sum(ord(c) * (i+1) for i, c in enumerate(user_id_str))
+    
+    # 取模得到行索引
+    return hash_value % total_rows
+    
 # ------------------ 2) MySQL 连接 ------------------
 def get_connection():
     """
@@ -273,7 +293,7 @@ def query_page(query_position):
                         # 处理文档数量
                         if len(raw_docnos) >= 9:
                             # 计算 row_index
-                            row_index = (abs(hash(user_id)) + query_id) % 9
+                            row_index = get_user_row_index(user_id)
                             print(f"DEBUG: Using Latin square row_index={row_index}")
                             # 取拉丁方的一行
                             perm = LATIN_9x9[row_index]
