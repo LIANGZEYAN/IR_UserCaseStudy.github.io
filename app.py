@@ -514,9 +514,26 @@ try:
     if missing_columns:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
-        # 导入数据到数据库
-        import_df_to_database(df)
-        print(f"成功从 selected_docs.csv 导入数据")
+        # 检查documents表是否为空
+        is_table_empty = True  # 默认假设表为空
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT COUNT(*) AS count FROM documents")
+                result = c.fetchone()
+                document_count = result['count'] if result else 0
+                
+                if document_count > 0:
+                    print(f"跳过导入: documents表已包含{document_count}条记录")
+                    is_table_empty = False
+        finally:
+            conn.close()  # 立即关闭连接
+        
+        # 如果表为空，执行导入
+        if is_table_empty:
+            import_df_to_database(df)  # 这个函数会自己管理连接
+            print(f"成功从 selected_docs.csv 导入数据")
+            
 except Exception as e:
     print(f"导入数据时出错: {e}")
 
