@@ -536,7 +536,7 @@ clear_documents_table()
 
 try:
     # 读取CSV文件
-    df = pd.read_csv("selected_docs.csv")
+    df = pd.read_csv("btdi_selection_results.csv")
     
     # 检查必要的列是否存在
     required_columns = ['qid', 'query', 'docno', 'text']
@@ -545,6 +545,10 @@ try:
     if missing_columns:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
+        # 只保留前27个查询的数据
+        unique_qids = df['qid'].unique()[:27]
+        filtered_df = df[df['qid'].isin(unique_qids)]
+        
         # 检查documents表是否为空
         is_table_empty = True  # 默认假设表为空
         conn = get_connection()
@@ -562,8 +566,8 @@ try:
         
         # 如果表为空，执行导入
         if is_table_empty:
-            import_df_to_database(df)  # 这个函数会自己管理连接
-            print(f"成功从 selected_docs.csv 导入数据")
+            import_df_to_database(filtered_df)  # 使用过滤后的DataFrame
+            print(f"成功从 selected_docs.csv 导入前27个查询的数据")
             
 except Exception as e:
     print(f"导入数据时出错: {e}")
