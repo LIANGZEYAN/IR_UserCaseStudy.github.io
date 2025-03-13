@@ -503,28 +503,29 @@ def insert_documents_from_df(df):
 # 在容器/本地启动时，自动建表并插入初始数据（如空）
 init_db()
 
-def clear_documents_table():
-    """清空documents表中的所有记录"""
+def clear_tables_before_import():
+    """简单清空所有相关表"""
     try:
         conn = get_connection()
         try:
             with conn.cursor() as c:
-                # 获取当前记录数
-                c.execute("SELECT COUNT(*) AS count FROM documents")
-                result = c.fetchone()
-                document_count = result['count'] if result else 0
+                # 删除查询-文档映射表数据
+                c.execute("DELETE FROM query_document_map")
                 
-                # 执行删除操作
+                # 删除文档表数据
                 c.execute("DELETE FROM documents")
+                
+                # 删除查询表数据
+                c.execute("DELETE FROM queries")
                 
                 # 提交事务
                 conn.commit()
                 
-                print(f"已清空documents表，删除了{document_count}条记录")
+                print("已清空所有相关表，准备导入新数据")
                 return True
         except Exception as e:
             conn.rollback()  # 出错时回滚
-            print(f"清空documents表时出错: {e}")
+            print(f"清空表时出错: {e}")
             return False
         finally:
             conn.close()
@@ -532,7 +533,7 @@ def clear_documents_table():
         print(f"连接数据库时出错: {e}")
         return False
         
-clear_documents_table()
+clear_tables_before_import()
 
 try:
     # 读取CSV文件
@@ -568,7 +569,7 @@ try:
         if is_table_empty:
             import_df_to_database(filtered_df)  # 使用过滤后的DataFrame
             print(f"成功从 selected_docs.csv 导入前27个查询的数据")
-            
+
 except Exception as e:
     print(f"导入数据时出错: {e}")
 
