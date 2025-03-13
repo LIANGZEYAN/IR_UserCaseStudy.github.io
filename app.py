@@ -509,8 +509,6 @@ def clear_tables_before_import():
         conn = get_connection()
         try:
             with conn.cursor() as c:
-                # 删除查询-文档映射表数据
-                c.execute("DELETE FROM query_document_map")
                 
                 # 删除文档表数据
                 c.execute("DELETE FROM documents")
