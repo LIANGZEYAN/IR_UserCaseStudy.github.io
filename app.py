@@ -535,7 +535,7 @@ clear_tables_before_import()
 
 try:
     # 读取CSV文件
-    df = pd.read_csv("btdi_selection_results.csv")
+    df = pd.read_csv("strategic_selection_results.csv")
     
     # 检查必要的列是否存在
     required_columns = ['qid', 'query', 'docno', 'text']
