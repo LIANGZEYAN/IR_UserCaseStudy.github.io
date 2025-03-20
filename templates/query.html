@@ -316,25 +316,42 @@
       .catch(err => console.error("Log error:", err));
     }
 
-    // 打开或取消选中文档
+    // 修改openEnlargeModal函数
     function openEnlargeModal(element) {
       let docnoStr = element.getAttribute('data-docno');
       let docno = docnoStr;
       
-      // 保存原始docno字符串
       console.debug("Processing document with docno:", docno);
       
       if (element.classList.contains('selected')) {
-        // 取消选中文档
-        element.classList.remove('selected');
-        let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
-        selectedDocs = selectedDocs.filter(n => String(n) !== String(docno));
-        sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
-        logEvent({ docno: docno, eventType: "UNSELECT" });
-        let originalText = element.getAttribute('data-fulltext');
-        element.querySelector(".doc-content").innerText = originalText;
+        // 如果文档已被选中，询问用户是取消选择还是重新选择文本
+        if (confirm("This document is already selected. Do you want to cancel selection? Click 'OK' to cancel, or 'Cancel' to update your text selection.")) {
+          // 用户选择取消选择
+          element.classList.remove('selected');
+          let selectedDocs = JSON.parse(sessionStorage.getItem("selected_docs_qid_" + currentQid)) || [];
+          selectedDocs = selectedDocs.filter(n => String(n) !== String(docno));
+          sessionStorage.setItem("selected_docs_qid_" + currentQid, JSON.stringify(selectedDocs));
+          
+          // 删除保存的文本高亮
+          let passageHighlights = JSON.parse(sessionStorage.getItem("passage_highlight_qid_" + currentQid)) || {};
+          delete passageHighlights[docno];
+          sessionStorage.setItem("passage_highlight_qid_" + currentQid, JSON.stringify(passageHighlights));
+          
+          // 恢复原始文本
+          let originalText = element.getAttribute('data-fulltext');
+          element.querySelector(".doc-content").innerText = originalText.substring(0, 500);
+          
+          logEvent({ docno: docno, eventType: "UNSELECT" });
+        } else {
+          // 用户选择更新文本选择
+          currentDocno = docno;
+          let fullText = element.getAttribute('data-fulltext');
+          logEvent({ docno: docno, eventType: "UPDATE_SELECTION" });
+          document.getElementById("enlargeDoc").innerText = fullText;
+          document.getElementById("enlargeModal").style.display = "block";
+        }
       } else {
-        // 打开文档扩展模态框
+        // 文档未被选中，打开文档扩展模态框
         currentDocno = docno;
         let fullText = element.getAttribute('data-fulltext');
         logEvent({ docno: docno, eventType: "OPEN_DOC" });
