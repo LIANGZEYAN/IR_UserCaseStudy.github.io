@@ -535,7 +535,7 @@ clear_tables_before_import()
 
 try:
     # 读取CSV文件
-    df = pd.read_csv("strategic_selection_results.csv")
+    df = pd.read_csv("strategic_selection_results_version2.csv")
     
     # 检查必要的列是否存在
     required_columns = ['qid', 'query', 'docno', 'text']
@@ -545,7 +545,7 @@ try:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
         # 只保留前27个查询的数据
-        unique_qids = df['qid'].unique()[-26:]
+        unique_qids = df['qid'].unique()[:27]
         filtered_df = df[df['qid'].isin(unique_qids)]
         
         # 检查documents表是否为空
