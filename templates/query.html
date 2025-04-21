@@ -243,6 +243,7 @@
     let currentQid = {{ query_id }};  // 数据库中的真实查询ID
     let currentPosition = {{ query_position }};  // 查询位置（1, 2, 3...）
     let totalQueries = {{ total_queries }};  // 总查询数
+    console.debug = function() {};
     console.debug("Current Position:", currentPosition, "Current Qid (DB):", currentQid);
     let userId = "{{ session['user_id'] }}";
     let lastEventTime = Date.now();
