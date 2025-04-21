@@ -5,12 +5,13 @@ from datetime import datetime
 from urllib.parse import urlparse
 import pandas as pd
 from itertools import permutations
+from dbutils.pooled_db import PooledDB
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
 DEBUG_ENABLED = False 
-
+    
 def debug_print(message):
     """只在DEBUG_ENABLED为True时打印调试信息"""
     if DEBUG_ENABLED:
@@ -54,6 +55,32 @@ def get_user_row_index(user_id, total_rows=9):
     return hash_value % total_rows
     
 # ------------------ 2) MySQL 连接 ------------------
+# 创建数据库连接池
+def create_pool():
+    url = os.environ["MYSQL_URL"]
+    parsed = urlparse(url)
+    return PooledDB(
+        creator=pymysql,
+        host=parsed.hostname,
+        port=parsed.port, 
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path.lstrip('/'),
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor,
+        maxconnections=10,
+        blocking=True
+    )
+
+# 初始化连接池
+db_pool = create_pool()
+
+# 替换原来的get_connection函数
+def get_connection():
+    """从连接池获取连接而不是每次创建新连接"""
+    return db_pool.connection()
+    
+"""
 def get_connection():
     """
     通过 MYSQL_URL 解析 MySQL DSN (host, port, user, password, db) 并返回连接
@@ -74,7 +101,7 @@ def get_connection():
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
-
+"""
 # ------------------ 3) 初始化数据库表 ------------------
 def init_db():
     """
