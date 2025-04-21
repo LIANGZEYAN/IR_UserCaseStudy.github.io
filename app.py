@@ -80,28 +80,27 @@ def get_connection():
     """从连接池获取连接而不是每次创建新连接"""
     return db_pool.connection()
     
-"""
-def get_connection():
+
+#def get_connection():
     """
     通过 MYSQL_URL 解析 MySQL DSN (host, port, user, password, db) 并返回连接
     """
-    url = os.environ["MYSQL_URL"]  # e.g. "mysql://root:xxxx@containers-xxx:3306/railway"
-    parsed = urlparse(url)
-    host = parsed.hostname
-    port = parsed.port
-    user = parsed.username
-    password = parsed.password
-    db = parsed.path.lstrip('/')
-    return pymysql.connect(
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        db=db,
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
-"""
+    #url = os.environ["MYSQL_URL"]  # e.g. "mysql://root:xxxx@containers-xxx:3306/railway"
+    #parsed = urlparse(url)
+    #host = parsed.hostname
+    #port = parsed.port
+    #user = parsed.username
+    #password = parsed.password
+    #db = parsed.path.lstrip('/')
+    #return pymysql.connect(
+        #host=host,
+        #port=port,
+        #user=user,
+        #password=password,
+        #db=db,
+        #charset='utf8mb4',
+        #cursorclass=pymysql.cursors.DictCursor
+    #)
 # ------------------ 3) 初始化数据库表 ------------------
 def init_db():
     """
