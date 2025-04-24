@@ -6,32 +6,12 @@ from urllib.parse import urlparse
 import pandas as pd
 from itertools import permutations
 from dbutils.pooled_db import PooledDB
-from functools import lru_cache
-import time
-from flask import g
-from threading import Thread
-import sys
-import time
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
-DEBUG_ENABLED = True 
-
-# ---------- 1. 添加全局缓存 ----------
-# 全局缓存扩展
-ALL_QUERIES = {}  # 所有查询内容 {query_id: content}
-ALL_DOCUMENTS = {}  # 所有文档内容 {(qid, doc_id): document}
-PRELOAD_COMPLETE = False  # 预加载完成标志
-PRELOAD_PROGRESS = 0  # 预加载进度（百分比）
-
-# 缓存变量 - 在全局级别定义
-QUERY_CACHE = {}  # 查询内容缓存 {query_id: content}
-DOC_ORDER_CACHE = {}  # 文档顺序缓存 {(user_id, query_id): doc_order_list}
-DOC_CONTENT_CACHE = {}  # 文档内容缓存 {(qid, doc_id): doc_content}
-LAST_CACHE_CLEAR = time.time()  # 上次清理缓存的时间
-CACHE_TTL = 5400  # 缓存生存时间（秒）
-
+DEBUG_ENABLED = False 
+    
 def debug_print(message):
     """只在DEBUG_ENABLED为True时打印调试信息"""
     if DEBUG_ENABLED:
@@ -75,7 +55,7 @@ def get_user_row_index(user_id, total_rows=9):
     return hash_value % total_rows
     
 # ------------------ 2) MySQL 连接 ------------------
-# 修改连接池配置，增加最大连接数和超时设置
+# 创建数据库连接池
 def create_pool():
     url = os.environ["MYSQL_URL"]
     parsed = urlparse(url)
@@ -88,13 +68,8 @@ def create_pool():
         database=parsed.path.lstrip('/'),
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor,
-        maxconnections=20,      # 增加最大连接数
-        mincached=5,            # 最小空闲连接数
-        maxcached=10,           # 最大空闲连接数
-        blocking=True,          # 连接池满时阻塞
-        maxusage=1000,          # 一个连接最多被使用的次数
-        setsession=[],          # 连接时执行的命令列表
-        ping=1                  # 自动检查连接是否可用
+        maxconnections=10,
+        blocking=True
     )
 
 # 初始化连接池
@@ -208,9 +183,11 @@ def init_db():
 
 AVAILABLE_QUERY_IDS = []
 
-@lru_cache(maxsize=1)  # 使用Python内置的LRU缓存
 def get_available_query_ids():
-    """从数据库获取所有可用的查询ID - 添加缓存"""
+    """
+    从数据库获取所有可用的查询ID
+    返回按ID排序的列表
+    """
     query_ids = []
     try:
         conn = get_connection()
@@ -237,9 +214,8 @@ def load_query_ids():
 def index():
     """
     首页：用户输入 user_id 并勾选 T&C。
-    登录成功后预加载所有数据。
     """
-    global AVAILABLE_QUERY_IDS, PRELOAD_COMPLETE, PRELOAD_PROGRESS
+    global AVAILABLE_QUERY_IDS
     
     # 确保查询ID列表已加载
     if not AVAILABLE_QUERY_IDS:
@@ -255,419 +231,27 @@ def index():
         
         session["user_id"] = user_id
         
-        # 启动预加载线程
-        def start_preload():
-            preload_all_data(user_id)
-            
-        preload_thread = Thread(target=start_preload)
-        preload_thread.daemon = True
-        preload_thread.start()
-        
-        # 如果有可用的查询ID，重定向到加载页面
+        # 如果有可用的查询ID，重定向到第一个
         if AVAILABLE_QUERY_IDS:
-            return redirect(url_for("loading_page"))
+            first_query_position = 1  # 这是位置，不是ID
+            return redirect(url_for("query_page", query_position=first_query_position))
         else:
             return render_template("index.html", error="No queries available in the database.")
             
     return render_template("index.html", query_count=len(AVAILABLE_QUERY_IDS))
 
-# 添加加载页面
-@app.route("/loading")
-def loading_page():
-    """显示数据加载进度，完成后自动跳转到第一个查询"""
-    if "user_id" not in session:
-        return redirect(url_for("index"))
-        
-    return render_template(
-        "loading.html", 
-        progress=PRELOAD_PROGRESS,
-        complete=PRELOAD_COMPLETE
-    )
-
-# 添加加载状态API
-@app.route("/api/loading-status")
-def loading_status():
-    """返回加载进度"""
-    return jsonify({
-        "progress": PRELOAD_PROGRESS,
-        "complete": PRELOAD_COMPLETE
-    })
-    
-# 4. 确保清理缓存函数包含日志
-def clear_old_caches():
-    """定期清理过期缓存"""
-    global LAST_CACHE_CLEAR
-    current_time = time.time()
-    
-    # 每隔CACHE_TTL秒清理一次缓存
-    if current_time - LAST_CACHE_CLEAR > CACHE_TTL:
-        # 记录清理前的缓存大小
-        before_size = {
-            'QUERY_CACHE': len(QUERY_CACHE),
-            'DOC_ORDER_CACHE': len(DOC_ORDER_CACHE),
-            'DOC_CONTENT_CACHE': len(DOC_CONTENT_CACHE)
-        }
-        
-        # 清理缓存
-        QUERY_CACHE.clear()
-        DOC_ORDER_CACHE.clear()
-        DOC_CONTENT_CACHE.clear()
-        LAST_CACHE_CLEAR = current_time
-        
-        print(f"INFO: 已清理缓存 (之前大小: QUERY={before_size['QUERY_CACHE']}, " +
-              f"ORDER={before_size['DOC_ORDER_CACHE']}, CONTENT={before_size['DOC_CONTENT_CACHE']})")
-
-def debug_print(message):
-    """增强的调试日志函数"""
-    if DEBUG_ENABLED:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        print(f"[DEBUG {timestamp}] {message}")
-        
-# ---------- 2. 优化数据库连接管理 ----------
-@app.before_request
-def before_request():
-    """每个请求前设置数据库连接"""
-    g.db_conn = get_connection()
-    g.start_time = time.time()
-
-@app.teardown_request
-def teardown_request(exception=None):
-    """每个请求后关闭数据库连接"""
-    db_conn = getattr(g, 'db_conn', None)
-    if db_conn is not None:
-        db_conn.close()
-    
-    # 打印请求处理时间（可选，用于性能分析）
-    if DEBUG_ENABLED:
-        if hasattr(g, 'start_time'):
-            duration = time.time() - g.start_time
-            print(f"DEBUG: Request processed in {duration:.3f} seconds")
-
-# 预加载函数 - 在登录成功后调用
-def preload_all_data(user_id):
-    """预加载所有查询和文档数据到内存中"""
-    global PRELOAD_COMPLETE, PRELOAD_PROGRESS
-    
-    start_time = time.time()
-    print(f"开始为用户 {user_id} 预加载所有数据...")
-    
-    # 重置进度
-    PRELOAD_PROGRESS = 0
-    PRELOAD_COMPLETE = False
-    
-    # 1. 加载所有查询
-    load_all_queries()
-    PRELOAD_PROGRESS = 30
-    
-    # 2. 加载所有文档
-    load_all_documents()
-    PRELOAD_PROGRESS = 80
-    
-    # 3. 为当前用户生成并缓存所有文档顺序
-    generate_all_doc_orders(user_id)
-    PRELOAD_PROGRESS = 100
-    
-    # 标记预加载完成
-    PRELOAD_COMPLETE = True
-    
-    # 显示缓存统计
-    total_size = sys.getsizeof(ALL_QUERIES) + sys.getsizeof(ALL_DOCUMENTS) + sys.getsizeof(DOC_ORDER_CACHE)
-    print(f"预加载完成！用时 {time.time()-start_time:.2f} 秒")
-    print(f"缓存统计: {len(ALL_QUERIES)} 个查询, {len(ALL_DOCUMENTS)} 个文档, {len(DOC_ORDER_CACHE)} 个文档顺序")
-    print(f"估计内存使用: {total_size/1024:.2f} KB")
-    
-    return True
-
-def load_all_queries():
-    """加载所有查询到内存"""
-    global ALL_QUERIES, QUERY_CACHE
-    
-    conn = get_connection()
-    try:
-        with conn.cursor() as c:
-            c.execute("SELECT id, content FROM queries ORDER BY id")
-            queries = c.fetchall()
-            
-            for query in queries:
-                query_id = int(query['id'])
-                ALL_QUERIES[query_id] = query['content']
-                # 同时更新普通查询缓存
-                QUERY_CACHE[query_id] = query['content']
-                
-            print(f"已加载 {len(queries)} 个查询到内存")
-    finally:
-        conn.close()
-
-def load_all_documents():
-    """加载所有文档到内存"""
-    global ALL_DOCUMENTS, DOC_CONTENT_CACHE
-    
-    conn = get_connection()
-    try:
-        with conn.cursor() as c:
-            c.execute("SELECT id, qid, docno, content FROM documents")
-            docs = c.fetchall()
-            
-            for doc in docs:
-                doc_id = int(doc['id'])
-                qid = int(doc['qid'])
-                
-                # 确保docno是字符串
-                if doc['docno'] is None:
-                    doc['docno'] = str(doc_id)
-                else:
-                    doc['docno'] = str(doc['docno'])
-                
-                # 存储到全局文档缓存
-                cache_key = (qid, doc_id)
-                ALL_DOCUMENTS[cache_key] = doc
-                # 同时更新普通文档缓存
-                DOC_CONTENT_CACHE[cache_key] = doc
-                
-            print(f"已加载 {len(docs)} 个文档到内存")
-    finally:
-        conn.close()
-
-def generate_all_doc_orders(user_id):
-    """为当前用户生成所有查询的文档顺序"""
-    global DOC_ORDER_CACHE
-    
-    # 获取所有查询ID
-    query_ids = list(ALL_QUERIES.keys())
-    
-    # 确保user_id是字符串
-    user_id = str(user_id)
-    
-    conn = get_connection()
-    try:
-        with conn.cursor() as c:
-            # 先检查数据库中已有的顺序
-            placeholders = ','.join(['%s'] * len(query_ids))
-            c.execute(f"SELECT query_id, doc_order FROM orders WHERE user_id=%s AND query_id IN ({placeholders})",
-                      [user_id] + query_ids)
-            existing_orders = {int(row['query_id']): row['doc_order'] for row in c.fetchall()}
-            
-            # 计算行索引，用于拉丁方
-            row_index = get_user_row_index(user_id)
-            
-            # 批量插入需要的数据
-            orders_to_insert = []
-            
-            for query_id in query_ids:
-                if query_id in existing_orders:
-                    # 已存在顺序，解析并缓存
-                    doc_order_str = existing_orders[query_id]
-                    doc_order = [int(x) for x in doc_order_str.split(',')]
-                    DOC_ORDER_CACHE[(user_id, query_id)] = doc_order
-                else:
-                    # 需要生成新顺序
-                    # 获取该查询的所有文档ID
-                    query_docs = [doc_id for (qid, doc_id) in ALL_DOCUMENTS.keys() if qid == query_id]
-                    
-                    if len(query_docs) >= 9:
-                        # 使用拉丁方重排
-                        perm = LATIN_9x9[row_index]
-                        doc_order = []
-                        for i in range(9):
-                            idx = perm[i] - 1
-                            if 0 <= idx < len(query_docs):
-                                doc_order.append(query_docs[idx])
-                    else:
-                        # 文档数量不足，直接使用
-                        doc_order = query_docs
-                    
-                    # 更新缓存
-                    DOC_ORDER_CACHE[(user_id, query_id)] = doc_order
-                    
-                    # 准备数据库插入
-                    if doc_order:
-                        doc_order_str = ','.join(str(x) for x in doc_order)
-                        orders_to_insert.append((user_id, query_id, doc_order_str))
-            
-            # 批量插入新生成的顺序
-            if orders_to_insert:
-                c.executemany(
-                    "INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
-                    orders_to_insert
-                )
-                conn.commit()
-                
-            print(f"已为用户 {user_id} 生成/加载了 {len(query_ids)} 个查询的文档顺序")
-            print(f"其中 {len(orders_to_insert)} 个是新生成的")
-    finally:
-        conn.close()
-        
-# ---------- 3. 优化数据库查询函数 ----------
-def get_query_content(query_id):
-    """获取查询内容，优先使用预加载数据"""
-    # 确保query_id是整数
-    query_id = int(query_id)
-    
-    # 优先查找预加载的数据
-    if query_id in ALL_QUERIES:
-        return ALL_QUERIES[query_id]
-    
-    # 其次查找普通缓存
-    if query_id in QUERY_CACHE:
-        return QUERY_CACHE[query_id]
-    
-    # 缓存未命中，从数据库获取
-    conn = g.db_conn
-    with conn.cursor() as c:
-        c.execute("SELECT content FROM queries WHERE id=%s", (query_id,))
-        row = c.fetchone()
-        if row and row["content"]:
-            # 更新缓存
-            QUERY_CACHE[query_id] = row["content"]
-            return row["content"]
-    
-    # 默认返回
-    return f"Query {query_id} (No data available)"
-
-def get_doc_order(user_id, query_id):
-    """获取文档顺序，使用缓存"""
-    cache_key = (user_id, query_id)
-    
-    # 检查缓存
-    if cache_key in DOC_ORDER_CACHE:
-        debug_print(f"DEBUG: Doc order cache hit for user={user_id}, query={query_id}")
-        return DOC_ORDER_CACHE[cache_key]
-    
-    debug_print(f"DEBUG: Doc order cache miss for user={user_id}, query={query_id}")
-    # 缓存未命中，从数据库获取
-    conn = g.db_conn
-    with conn.cursor() as c:
-        c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
-        row = c.fetchone()
-        if row and row["doc_order"]:
-            # 已有顺序
-            doc_order_str = row["doc_order"]
-            doc_order = [int(x) for x in doc_order_str.split(",")]
-            
-            # 更新缓存
-            DOC_ORDER_CACHE[cache_key] = doc_order
-            return doc_order
-    
-    # 没有找到顺序，返回空列表（外部会处理）
-    return []
-
-# 3. 改进get_documents_for_query函数，确保缓存正常工作
-def get_documents_for_query(query_id, doc_order):
-    """获取文档内容，优先使用预加载数据"""
-    if not doc_order:
-        return []
-    
-    # 确保query_id是整数
-    query_id = int(query_id)
-    
-    # 转换doc_order中的所有ID为整数
-    doc_order = [int(d) for d in doc_order]
-    
-    # 从预加载或缓存中获取文档
-    result = []
-    for doc_id in doc_order:
-        # 先检查预加载数据
-        cache_key = (query_id, doc_id)
-        if cache_key in ALL_DOCUMENTS:
-            result.append(ALL_DOCUMENTS[cache_key])
-            continue
-            
-        # 再检查普通缓存
-        if cache_key in DOC_CONTENT_CACHE:
-            result.append(DOC_CONTENT_CACHE[cache_key])
-            continue
-            
-        # 如果都没有找到，留空（这种情况不应该发生，因为我们预加载了所有数据）
-        debug_print(f"警告: 文档 {doc_id} 在缓存中未找到！")
-    
-    return result
-    
-    # 如果有未缓存的文档，批量查询
-    if uncached_ids:
-        debug_print(f"从数据库获取 {len(uncached_ids)} 个未缓存的文档")
-        conn = g.db_conn
-        with conn.cursor() as c:
-            placeholders = ",".join(["%s"] * len(uncached_ids))
-            sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
-            params = [query_id] + uncached_ids
-            c.execute(sql, params)
-            rows = c.fetchall()
-            
-            debug_print(f"查询返回 {len(rows)} 个文档")
-            
-            # 更新缓存和临时映射
-            for row in rows:
-                # 确保所有必要字段存在
-                if "docno" not in row or row["docno"] is None:
-                    row["docno"] = str(row["id"])
-                else:
-                    row["docno"] = str(row["docno"])
-                
-                if "content" not in row or row["content"] is None:
-                    row["content"] = "文档内容不可用"
-                
-                # 更新缓存和文档映射
-                cache_key = (int(query_id), int(row["id"]))  # 确保使用整数类型
-                DOC_CONTENT_CACHE[cache_key] = row
-                doc_map[row["id"]] = row
-    
-    # 按doc_order排序并返回文档
-    result = [doc_map[d] for d in doc_order if d in doc_map]
-    debug_print(f"最终返回 {len(result)} 个文档")
-    return result
-    
-def generate_store_doc_order(user_id, query_id):
-    """生成并存储文档顺序"""
-    conn = g.db_conn
-    with conn.cursor() as c:
-        # 获取原始文档ID列表
-        c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
-        raw_docnos = [r["id"] for r in c.fetchall()]
-        
-        if not raw_docnos:
-            return []
-            
-        # 处理文档顺序
-        if len(raw_docnos) >= 9:
-            # 计算 row_index
-            row_index = get_user_row_index(user_id)
-            # 取拉丁方的一行
-            perm = LATIN_9x9[row_index]
-            
-            # 安全地重排文档
-            doc_order = []
-            for i in range(9):
-                idx = perm[i] - 1
-                if 0 <= idx < len(raw_docnos):  # 安全检查
-                    doc_order.append(raw_docnos[idx])
-        else:
-            doc_order = raw_docnos.copy()
-        
-        # 存到 orders 表
-        if doc_order:
-            doc_order_str = ",".join(str(x) for x in doc_order)
-            c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
-                    (user_id, query_id, doc_order_str))
-            conn.commit()
-            
-            # 更新缓存
-            cache_key = (user_id, query_id)
-            DOC_ORDER_CACHE[cache_key] = doc_order
-            
-            return doc_order
-        return []
-        
-# 2. 修复缓存键和查询页面函数
+# 修改query_page路由，使用位置（position）而不是ID
 @app.route("/query/<int:query_position>", methods=["GET", "POST"])
 def query_page(query_position):
-    """优化后的查询页面处理函数"""
+    """
+    每个 user_id + query_position:
+    1) 通过位置(1,2,3...)获取实际的查询ID
+    2) 从 orders 表查看是否已有 doc_order
+    3) 若无 -> 用拉丁方行来重排 documents 并存入 orders
+    4) 再从 orders 拿 doc_order 并查询 documents 详情
+    5) queries 表里取出 query 内容
+    """
     global AVAILABLE_QUERY_IDS
-    
-    # 记录开始时间以计算总处理时间
-    start_time = time.time()
-    
-    # 清理过期缓存
-    clear_old_caches()
     
     # 确保查询ID列表已加载
     if not AVAILABLE_QUERY_IDS:
@@ -679,13 +263,13 @@ def query_page(query_position):
     
     # 获取实际的查询ID
     query_id = AVAILABLE_QUERY_IDS[query_position - 1]
-    debug_print(f"处理查询: position={query_position}, actual_id={query_id}")
+    print(f"INFO: Query position {query_position} maps to database query ID {query_id}")
     
     if "user_id" not in session:
         return redirect(url_for("index"))
     
     user_id = session["user_id"]
-    debug_print(f"用户ID: {user_id}")
+    debug_print(f"DEBUG: Processing query_page for user_id={user_id}, query_position={query_position}, query_id={query_id}")
     
     # 记录用户首次访问某个查询的时间
     is_first_visit = False
@@ -695,60 +279,125 @@ def query_page(query_position):
     if query_position not in session["visited_positions"]:
         session["visited_positions"].append(query_position)
         is_first_visit = True
-        debug_print(f"首次访问查询位置 {query_position}")
-    
+        debug_print(f"DEBUG: First visit to query position {query_position} for user {user_id}")
+
     if request.method == "POST":
         if query_position < len(AVAILABLE_QUERY_IDS):
             return redirect(url_for("query_page", query_position=query_position + 1))
         else:
             return redirect(url_for("thanks"))
+
+    # 默认值
+    query_content = f"Query {query_id} (No data available)"
+    docs = []
     
-    # 跟踪每个步骤的时间
-    timing = {}
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                # 1. 获取查询内容
+                c.execute("SELECT content FROM queries WHERE id=%s", (query_id,))
+                row_q = c.fetchone()
+                if row_q and row_q["content"]:
+                    query_content = row_q["content"]
+                    debug_print(f"DEBUG: Found query content: '{query_content}'")
+                else:
+                    debug_print(f"DEBUG: No query content found for query_id={query_id}")
+
+                # 2. 检查是否已有文档顺序
+                c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
+                row_o = c.fetchone()
+                if row_o and row_o["doc_order"]:
+                    # 已有顺序
+                    doc_order_str = row_o["doc_order"]
+                    doc_order = [int(x) for x in doc_order_str.split(",")]
+                    debug_print(f"DEBUG: Found existing doc_order: {doc_order}")
+                else:
+                    # 第一次访问 -> 生成 doc_order
+                    debug_print(f"DEBUG: No existing doc_order, generating new one")
+                    c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
+                    raw_docnos = [r["id"] for r in c.fetchall()]
+                    debug_print(f"DEBUG: Retrieved raw_docnos: {raw_docnos}, length: {len(raw_docnos)}")
+                    
+                    if not raw_docnos:
+                        print(f"WARNING: No documents found for query_id={query_id}")
+                        doc_order = []
+                    else:
+                        # 处理文档数量
+                        if len(raw_docnos) >= 9:
+                            # 计算 row_index
+                            row_index = get_user_row_index(user_id)
+                            debug_print(f"DEBUG: Using Latin square row_index={row_index}")
+                            # 取拉丁方的一行
+                            perm = LATIN_9x9[row_index]
+                            debug_print(f"DEBUG: Selected permutation: perm={perm}")
+                            
+                            # 安全地重排文档
+                            doc_order = []
+                            for i in range(9):
+                                idx = perm[i] - 1
+                                if 0 <= idx < len(raw_docnos):  # 安全检查
+                                    doc_order.append(raw_docnos[idx])
+                            debug_print(f"DEBUG: Generated doc_order={doc_order}")
+                        else:
+                            print(f"WARNING: Only {len(raw_docnos)} documents found for query_id={query_id}, expected at least 9")
+                            doc_order = raw_docnos.copy()
+                    
+                    # 存到 orders 表
+                    if doc_order:
+                        doc_order_str = ",".join(str(x) for x in doc_order)
+                        c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
+                                (user_id, query_id, doc_order_str))
+                        conn.commit()
+                        debug_print(f"DEBUG: Inserted doc_order into orders table")
+                    else:
+                        print(f"WARNING: Empty doc_order, not inserting into orders table")
+
+                # 3. 获取文档详情
+                if doc_order:
+                    placeholders = ",".join(["%s"] * len(doc_order))
+                    sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
+                    params = [query_id] + doc_order
+                    debug_print(f"DEBUG: Executing SQL: {sql}")
+                    c.execute(sql, params)
+                    rows = c.fetchall()
+                    debug_print(f"DEBUG: Retrieved {len(rows)} documents")
+                    
+                    # 按 doc_order 排序
+                    doc_map = {r["id"]: r for r in rows}
+                    docs = [doc_map[d] for d in doc_order if d in doc_map]
+                    debug_print(f"DEBUG: Final docs list has {len(docs)} documents")
+                    
+                    # 确保所有文档都有必要的字段
+                    for doc in docs:
+                        if "docno" not in doc or doc["docno"] is None:
+                            doc["docno"] = str(doc["id"])
+                        else:
+                            doc["docno"] = str(doc["docno"])
+                        
+                        if "content" not in doc or doc["content"] is None:
+                            doc["content"] = "文档内容不可用"
+                else:
+                    print(f"WARNING: Empty doc_order, no documents to retrieve")
+        finally:
+            conn.close()
+    except Exception as e:
+        import traceback
+        print(f"ERROR in query_page: {str(e)}")
+        print(traceback.format_exc())
     
-    # 获取查询内容 - 使用缓存
-    step_start = time.time()
-    query_content = get_query_content(query_id)
-    timing['query_content'] = time.time() - step_start
+    # 检查返回给模板的数据
+    debug_print(f"DEBUG: Sending to template - query_position: {query_position}, query_id: {query_id}, query_content: '{query_content}', docs count: {len(docs)}")
     
-    # 获取文档顺序 - 使用缓存
-    step_start = time.time()
-    doc_order = get_doc_order(user_id, query_id)
-    timing['doc_order'] = time.time() - step_start
-    
-    # 如果没有文档顺序，生成并存储
-    if not doc_order:
-        step_start = time.time()
-        doc_order = generate_store_doc_order(user_id, query_id)
-        timing['generate_order'] = time.time() - step_start
-    
-    # 获取文档内容 - 使用缓存和批量查询
-    step_start = time.time()
-    docs = get_documents_for_query(query_id, doc_order)
-    timing['documents'] = time.time() - step_start
-    
-    # 输出详细的性能信息
-    total_time = time.time() - start_time
-    debug_print(f"性能分析: query_content={timing.get('query_content', 0):.4f}s, " +
-                f"doc_order={timing.get('doc_order', 0):.4f}s, " +
-                f"generate_order={timing.get('generate_order', 0) if 'generate_order' in timing else 'N/A'}, " +
-                f"documents={timing.get('documents', 0):.4f}s, " +
-                f"total={total_time:.4f}s")
-    
-    # 输出缓存统计信息
-    debug_print(f"缓存状态: QUERY_CACHE={len(QUERY_CACHE)}项, " +
-                f"DOC_ORDER_CACHE={len(DOC_ORDER_CACHE)}项, " +
-                f"DOC_CONTENT_CACHE={len(DOC_CONTENT_CACHE)}项")
-    
-    # 渲染模板
+    # 渲染模板，传递实际查询ID和位置信息
     return render_template(
         "query.html", 
-        query_id=query_id,
-        query_position=query_position,
-        total_queries=len(AVAILABLE_QUERY_IDS),
+        query_id=query_id,  # 实际数据库ID
+        query_position=query_position,  # 位置(1,2,3)
+        total_queries=len(AVAILABLE_QUERY_IDS),  # 总查询数
         docs=docs, 
         query_content=query_content,
-        is_first_visit=is_first_visit
+        is_first_visit=is_first_visit  # 是否首次访问此查询
     )
 
 @app.route("/thanks")
