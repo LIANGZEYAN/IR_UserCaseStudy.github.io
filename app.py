@@ -13,7 +13,7 @@ from flask import g
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
-DEBUG_ENABLED = False 
+DEBUG_ENABLED = True 
 
 # ---------- 1. 添加全局缓存 ----------
 # 缓存变量 - 在全局级别定义
@@ -254,19 +254,36 @@ def index():
             
     return render_template("index.html", query_count=len(AVAILABLE_QUERY_IDS))
 
+# 4. 确保清理缓存函数包含日志
 def clear_old_caches():
     """定期清理过期缓存"""
     global LAST_CACHE_CLEAR
     current_time = time.time()
     
-    # 每小时清理一次缓存
+    # 每隔CACHE_TTL秒清理一次缓存
     if current_time - LAST_CACHE_CLEAR > CACHE_TTL:
+        # 记录清理前的缓存大小
+        before_size = {
+            'QUERY_CACHE': len(QUERY_CACHE),
+            'DOC_ORDER_CACHE': len(DOC_ORDER_CACHE),
+            'DOC_CONTENT_CACHE': len(DOC_CONTENT_CACHE)
+        }
+        
+        # 清理缓存
         QUERY_CACHE.clear()
         DOC_ORDER_CACHE.clear()
         DOC_CONTENT_CACHE.clear()
         LAST_CACHE_CLEAR = current_time
-        print("INFO: Cleared cache entries")
+        
+        print(f"INFO: 已清理缓存 (之前大小: QUERY={before_size['QUERY_CACHE']}, " +
+              f"ORDER={before_size['DOC_ORDER_CACHE']}, CONTENT={before_size['DOC_CONTENT_CACHE']})")
 
+def debug_print(message):
+    """增强的调试日志函数"""
+    if DEBUG_ENABLED:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        print(f"[DEBUG {timestamp}] {message}")
+        
 # ---------- 2. 优化数据库连接管理 ----------
 @app.before_request
 def before_request():
@@ -336,28 +353,35 @@ def get_doc_order(user_id, query_id):
     # 没有找到顺序，返回空列表（外部会处理）
     return []
 
+# 3. 改进get_documents_for_query函数，确保缓存正常工作
 def get_documents_for_query(query_id, doc_order):
     """高效获取文档内容，使用批量查询和缓存"""
     if not doc_order:
         return []
+    
+    debug_print(f"获取文档: query_id={query_id}, doc_order长度={len(doc_order)}")
     
     # 收集需要查询的文档IDs
     uncached_ids = []
     doc_map = {}
     
     # 首先检查缓存
+    cache_hits = 0
     for doc_id in doc_order:
-        cache_key = (query_id, doc_id)
+        cache_key = (int(query_id), int(doc_id))  # 确保使用整数类型作为键
         if cache_key in DOC_CONTENT_CACHE:
             # 从缓存获取
             doc_map[doc_id] = DOC_CONTENT_CACHE[cache_key]
+            cache_hits += 1
         else:
             # 需要从数据库查询
             uncached_ids.append(doc_id)
     
+    debug_print(f"文档缓存命中: {cache_hits}/{len(doc_order)}")
+    
     # 如果有未缓存的文档，批量查询
     if uncached_ids:
-        debug_print(f"DEBUG: Fetching {len(uncached_ids)} uncached documents from database")
+        debug_print(f"从数据库获取 {len(uncached_ids)} 个未缓存的文档")
         conn = g.db_conn
         with conn.cursor() as c:
             placeholders = ",".join(["%s"] * len(uncached_ids))
@@ -365,6 +389,8 @@ def get_documents_for_query(query_id, doc_order):
             params = [query_id] + uncached_ids
             c.execute(sql, params)
             rows = c.fetchall()
+            
+            debug_print(f"查询返回 {len(rows)} 个文档")
             
             # 更新缓存和临时映射
             for row in rows:
@@ -378,13 +404,15 @@ def get_documents_for_query(query_id, doc_order):
                     row["content"] = "文档内容不可用"
                 
                 # 更新缓存和文档映射
-                cache_key = (query_id, row["id"])
+                cache_key = (int(query_id), int(row["id"]))  # 确保使用整数类型
                 DOC_CONTENT_CACHE[cache_key] = row
                 doc_map[row["id"]] = row
     
     # 按doc_order排序并返回文档
-    return [doc_map[d] for d in doc_order if d in doc_map]
-
+    result = [doc_map[d] for d in doc_order if d in doc_map]
+    debug_print(f"最终返回 {len(result)} 个文档")
+    return result
+    
 def generate_store_doc_order(user_id, query_id):
     """生成并存储文档顺序"""
     conn = g.db_conn
@@ -426,11 +454,14 @@ def generate_store_doc_order(user_id, query_id):
             return doc_order
         return []
         
-# ---------- 4. 优化后的query_page路由 ----------
+# 2. 修复缓存键和查询页面函数
 @app.route("/query/<int:query_position>", methods=["GET", "POST"])
 def query_page(query_position):
     """优化后的查询页面处理函数"""
     global AVAILABLE_QUERY_IDS
+    
+    # 记录开始时间以计算总处理时间
+    start_time = time.time()
     
     # 清理过期缓存
     clear_old_caches()
@@ -445,11 +476,13 @@ def query_page(query_position):
     
     # 获取实际的查询ID
     query_id = AVAILABLE_QUERY_IDS[query_position - 1]
+    debug_print(f"处理查询: position={query_position}, actual_id={query_id}")
     
     if "user_id" not in session:
         return redirect(url_for("index"))
     
     user_id = session["user_id"]
+    debug_print(f"用户ID: {user_id}")
     
     # 记录用户首次访问某个查询的时间
     is_first_visit = False
@@ -459,6 +492,7 @@ def query_page(query_position):
     if query_position not in session["visited_positions"]:
         session["visited_positions"].append(query_position)
         is_first_visit = True
+        debug_print(f"首次访问查询位置 {query_position}")
     
     if request.method == "POST":
         if query_position < len(AVAILABLE_QUERY_IDS):
@@ -466,18 +500,42 @@ def query_page(query_position):
         else:
             return redirect(url_for("thanks"))
     
+    # 跟踪每个步骤的时间
+    timing = {}
+    
     # 获取查询内容 - 使用缓存
+    step_start = time.time()
     query_content = get_query_content(query_id)
+    timing['query_content'] = time.time() - step_start
     
     # 获取文档顺序 - 使用缓存
+    step_start = time.time()
     doc_order = get_doc_order(user_id, query_id)
+    timing['doc_order'] = time.time() - step_start
     
     # 如果没有文档顺序，生成并存储
     if not doc_order:
+        step_start = time.time()
         doc_order = generate_store_doc_order(user_id, query_id)
+        timing['generate_order'] = time.time() - step_start
     
     # 获取文档内容 - 使用缓存和批量查询
+    step_start = time.time()
     docs = get_documents_for_query(query_id, doc_order)
+    timing['documents'] = time.time() - step_start
+    
+    # 输出详细的性能信息
+    total_time = time.time() - start_time
+    debug_print(f"性能分析: query_content={timing.get('query_content', 0):.4f}s, " +
+                f"doc_order={timing.get('doc_order', 0):.4f}s, " +
+                f"generate_order={timing.get('generate_order', 0) if 'generate_order' in timing else 'N/A'}, " +
+                f"documents={timing.get('documents', 0):.4f}s, " +
+                f"total={total_time:.4f}s")
+    
+    # 输出缓存统计信息
+    debug_print(f"缓存状态: QUERY_CACHE={len(QUERY_CACHE)}项, " +
+                f"DOC_ORDER_CACHE={len(DOC_ORDER_CACHE)}项, " +
+                f"DOC_CONTENT_CACHE={len(DOC_CONTENT_CACHE)}项")
     
     # 渲染模板
     return render_template(
@@ -488,20 +546,6 @@ def query_page(query_position):
         docs=docs, 
         query_content=query_content,
         is_first_visit=is_first_visit
-    )
-    
-    # 检查返回给模板的数据
-    debug_print(f"DEBUG: Sending to template - query_position: {query_position}, query_id: {query_id}, query_content: '{query_content}', docs count: {len(docs)}")
-    
-    # 渲染模板，传递实际查询ID和位置信息
-    return render_template(
-        "query.html", 
-        query_id=query_id,  # 实际数据库ID
-        query_position=query_position,  # 位置(1,2,3)
-        total_queries=len(AVAILABLE_QUERY_IDS),  # 总查询数
-        docs=docs, 
-        query_content=query_content,
-        is_first_visit=is_first_visit  # 是否首次访问此查询
     )
 
 @app.route("/thanks")
