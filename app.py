@@ -5,18 +5,10 @@ from datetime import datetime
 from urllib.parse import urlparse
 import pandas as pd
 from itertools import permutations
-from dbutils.pooled_db import PooledDB
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
-DEBUG_ENABLED = False 
-    
-def debug_print(message):
-    """只在DEBUG_ENABLED为True时打印调试信息"""
-    if DEBUG_ENABLED:
-        print(message)
-        
 # ------------------ 1) 拉丁方生成 ------------------
 def generate_latin_square(N):
     """
@@ -55,52 +47,27 @@ def get_user_row_index(user_id, total_rows=9):
     return hash_value % total_rows
     
 # ------------------ 2) MySQL 连接 ------------------
-# 创建数据库连接池
-def create_pool():
-    url = os.environ["MYSQL_URL"]
-    parsed = urlparse(url)
-    return PooledDB(
-        creator=pymysql,
-        host=parsed.hostname,
-        port=parsed.port, 
-        user=parsed.username,
-        password=parsed.password,
-        database=parsed.path.lstrip('/'),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor,
-        maxconnections=10,
-        blocking=True
-    )
-
-# 初始化连接池
-db_pool = create_pool()
-
-# 替换原来的get_connection函数
 def get_connection():
-    """从连接池获取连接而不是每次创建新连接"""
-    return db_pool.connection()
-    
-
-#def get_connection():
     """
     通过 MYSQL_URL 解析 MySQL DSN (host, port, user, password, db) 并返回连接
     """
-    #url = os.environ["MYSQL_URL"]  # e.g. "mysql://root:xxxx@containers-xxx:3306/railway"
-    #parsed = urlparse(url)
-    #host = parsed.hostname
-    #port = parsed.port
-    #user = parsed.username
-    #password = parsed.password
-    #db = parsed.path.lstrip('/')
-    #return pymysql.connect(
-        #host=host,
-        #port=port,
-        #user=user,
-        #password=password,
-        #db=db,
-        #charset='utf8mb4',
-        #cursorclass=pymysql.cursors.DictCursor
-    #)
+    url = os.environ["MYSQL_URL"]  # e.g. "mysql://root:xxxx@containers-xxx:3306/railway"
+    parsed = urlparse(url)
+    host = parsed.hostname
+    port = parsed.port
+    user = parsed.username
+    password = parsed.password
+    db = parsed.path.lstrip('/')
+    return pymysql.connect(
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        db=db,
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
 # ------------------ 3) 初始化数据库表 ------------------
 def init_db():
     """
@@ -269,7 +236,7 @@ def query_page(query_position):
         return redirect(url_for("index"))
     
     user_id = session["user_id"]
-    debug_print(f"DEBUG: Processing query_page for user_id={user_id}, query_position={query_position}, query_id={query_id}")
+    print(f"DEBUG: Processing query_page for user_id={user_id}, query_position={query_position}, query_id={query_id}")
     
     # 记录用户首次访问某个查询的时间
     is_first_visit = False
@@ -279,7 +246,7 @@ def query_page(query_position):
     if query_position not in session["visited_positions"]:
         session["visited_positions"].append(query_position)
         is_first_visit = True
-        debug_print(f"DEBUG: First visit to query position {query_position} for user {user_id}")
+        print(f"DEBUG: First visit to query position {query_position} for user {user_id}")
 
     if request.method == "POST":
         if query_position < len(AVAILABLE_QUERY_IDS):
@@ -300,9 +267,9 @@ def query_page(query_position):
                 row_q = c.fetchone()
                 if row_q and row_q["content"]:
                     query_content = row_q["content"]
-                    debug_print(f"DEBUG: Found query content: '{query_content}'")
+                    print(f"DEBUG: Found query content: '{query_content}'")
                 else:
-                    debug_print(f"DEBUG: No query content found for query_id={query_id}")
+                    print(f"DEBUG: No query content found for query_id={query_id}")
 
                 # 2. 检查是否已有文档顺序
                 c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
@@ -311,13 +278,13 @@ def query_page(query_position):
                     # 已有顺序
                     doc_order_str = row_o["doc_order"]
                     doc_order = [int(x) for x in doc_order_str.split(",")]
-                    debug_print(f"DEBUG: Found existing doc_order: {doc_order}")
+                    print(f"DEBUG: Found existing doc_order: {doc_order}")
                 else:
                     # 第一次访问 -> 生成 doc_order
-                    debug_print(f"DEBUG: No existing doc_order, generating new one")
+                    print(f"DEBUG: No existing doc_order, generating new one")
                     c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
                     raw_docnos = [r["id"] for r in c.fetchall()]
-                    debug_print(f"DEBUG: Retrieved raw_docnos: {raw_docnos}, length: {len(raw_docnos)}")
+                    print(f"DEBUG: Retrieved raw_docnos: {raw_docnos}, length: {len(raw_docnos)}")
                     
                     if not raw_docnos:
                         print(f"WARNING: No documents found for query_id={query_id}")
@@ -327,10 +294,10 @@ def query_page(query_position):
                         if len(raw_docnos) >= 9:
                             # 计算 row_index
                             row_index = get_user_row_index(user_id)
-                            debug_print(f"DEBUG: Using Latin square row_index={row_index}")
+                            print(f"DEBUG: Using Latin square row_index={row_index}")
                             # 取拉丁方的一行
                             perm = LATIN_9x9[row_index]
-                            debug_print(f"DEBUG: Selected permutation: perm={perm}")
+                            print(f"DEBUG: Selected permutation: perm={perm}")
                             
                             # 安全地重排文档
                             doc_order = []
@@ -338,7 +305,7 @@ def query_page(query_position):
                                 idx = perm[i] - 1
                                 if 0 <= idx < len(raw_docnos):  # 安全检查
                                     doc_order.append(raw_docnos[idx])
-                            debug_print(f"DEBUG: Generated doc_order={doc_order}")
+                            print(f"DEBUG: Generated doc_order={doc_order}")
                         else:
                             print(f"WARNING: Only {len(raw_docnos)} documents found for query_id={query_id}, expected at least 9")
                             doc_order = raw_docnos.copy()
@@ -349,7 +316,7 @@ def query_page(query_position):
                         c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
                                 (user_id, query_id, doc_order_str))
                         conn.commit()
-                        debug_print(f"DEBUG: Inserted doc_order into orders table")
+                        print(f"DEBUG: Inserted doc_order into orders table")
                     else:
                         print(f"WARNING: Empty doc_order, not inserting into orders table")
 
@@ -358,15 +325,15 @@ def query_page(query_position):
                     placeholders = ",".join(["%s"] * len(doc_order))
                     sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
                     params = [query_id] + doc_order
-                    debug_print(f"DEBUG: Executing SQL: {sql}")
+                    print(f"DEBUG: Executing SQL: {sql}")
                     c.execute(sql, params)
                     rows = c.fetchall()
-                    debug_print(f"DEBUG: Retrieved {len(rows)} documents")
+                    print(f"DEBUG: Retrieved {len(rows)} documents")
                     
                     # 按 doc_order 排序
                     doc_map = {r["id"]: r for r in rows}
                     docs = [doc_map[d] for d in doc_order if d in doc_map]
-                    debug_print(f"DEBUG: Final docs list has {len(docs)} documents")
+                    print(f"DEBUG: Final docs list has {len(docs)} documents")
                     
                     # 确保所有文档都有必要的字段
                     for doc in docs:
@@ -387,7 +354,7 @@ def query_page(query_position):
         print(traceback.format_exc())
     
     # 检查返回给模板的数据
-    debug_print(f"DEBUG: Sending to template - query_position: {query_position}, query_id: {query_id}, query_content: '{query_content}', docs count: {len(docs)}")
+    print(f"DEBUG: Sending to template - query_position: {query_position}, query_id: {query_id}, query_content: '{query_content}', docs count: {len(docs)}")
     
     # 渲染模板，传递实际查询ID和位置信息
     return render_template(
