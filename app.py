@@ -213,10 +213,9 @@ def query_page(query_position):
     """
     每个 user_id + query_position:
     1) 通过位置(1,2,3...)获取实际的查询ID
-    2) 从 orders 表查看是否已有 doc_order
-    3) 若无 -> 用拉丁方行来重排 documents 并存入 orders
-    4) 再从 orders 拿 doc_order 并查询 documents 详情
-    5) queries 表里取出 query 内容
+    2) 使用user_id的哈希值确定拉丁方行索引（确定性方法）
+    3) 直接应用拉丁方排列到文档
+    4) 首次访问时存储排序（仅用于记录）
     """
     global AVAILABLE_QUERY_IDS
     
@@ -271,81 +270,56 @@ def query_page(query_position):
                 else:
                     print(f"DEBUG: No query content found for query_id={query_id}")
 
-                # 2. 检查是否已有文档顺序
-                c.execute("SELECT doc_order FROM orders WHERE user_id=%s AND query_id=%s", (user_id, query_id))
-                row_o = c.fetchone()
-                if row_o and row_o["doc_order"]:
-                    # 已有顺序
-                    doc_order_str = row_o["doc_order"]
-                    doc_order = [int(x) for x in doc_order_str.split(",")]
-                    print(f"DEBUG: Found existing doc_order: {doc_order}")
+                # 2. 获取该查询的所有文档
+                c.execute("SELECT id, content, docno FROM documents WHERE qid=%s ORDER BY id", (query_id,))
+                all_docs = c.fetchall()
+                print(f"DEBUG: Retrieved {len(all_docs)} documents for query_id={query_id}")
+                
+                # 3. 直接应用拉丁方排序（确定性方法）
+                if len(all_docs) >= 9:
+                    # 使用前9个文档
+                    docs_to_order = all_docs[:9]
+                    
+                    # 基于user_id确定性地获取拉丁方行
+                    row_index = get_user_row_index(user_id)
+                    print(f"DEBUG: Using Latin square row_index={row_index} for user_id={user_id}")
+                    perm = LATIN_9x9[row_index]
+                    print(f"DEBUG: Selected permutation: perm={perm}")
+                    
+                    # 应用排列
+                    ordered_docs = []
+                    for i in range(9):
+                        idx = perm[i] - 1  # 从1索引转换为0索引
+                        if idx < len(docs_to_order):  # 安全检查
+                            ordered_docs.append(docs_to_order[idx])
+                    
+                    docs = ordered_docs
+                    print(f"DEBUG: Applied Latin square permutation, got {len(docs)} documents")
                 else:
-                    # 第一次访问 -> 生成 doc_order
-                    print(f"DEBUG: No existing doc_order, generating new one")
-                    c.execute("SELECT id FROM documents WHERE qid=%s ORDER BY id", (query_id,))
-                    raw_docnos = [r["id"] for r in c.fetchall()]
-                    print(f"DEBUG: Retrieved raw_docnos: {raw_docnos}, length: {len(raw_docnos)}")
+                    # 文档不足9个，直接使用
+                    docs = all_docs
+                    print(f"WARNING: Only {len(all_docs)} documents found for query_id={query_id}, expected at least 9")
+                
+                # 4. 首次访问时存储排序（仅用于记录）
+                if is_first_visit and docs:
+                    doc_ids = [doc["id"] for doc in docs]
+                    doc_order_str = ",".join(str(x) for x in doc_ids)
                     
-                    if not raw_docnos:
-                        print(f"WARNING: No documents found for query_id={query_id}")
-                        doc_order = []
+                    # 直接存储，不需要检查是否存在
+                    c.execute("REPLACE INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
+                              (user_id, query_id, doc_order_str))
+                    conn.commit()
+                    print(f"DEBUG: Stored document order for user_id={user_id}, query_id={query_id}")
+                
+                # 确保所有文档都有必要字段
+                for doc in docs:
+                    if "docno" not in doc or doc["docno"] is None:
+                        doc["docno"] = str(doc["id"])
                     else:
-                        # 处理文档数量
-                        if len(raw_docnos) >= 9:
-                            # 计算 row_index
-                            row_index = get_user_row_index(user_id)
-                            print(f"DEBUG: Using Latin square row_index={row_index}")
-                            # 取拉丁方的一行
-                            perm = LATIN_9x9[row_index]
-                            print(f"DEBUG: Selected permutation: perm={perm}")
-                            
-                            # 安全地重排文档
-                            doc_order = []
-                            for i in range(9):
-                                idx = perm[i] - 1
-                                if 0 <= idx < len(raw_docnos):  # 安全检查
-                                    doc_order.append(raw_docnos[idx])
-                            print(f"DEBUG: Generated doc_order={doc_order}")
-                        else:
-                            print(f"WARNING: Only {len(raw_docnos)} documents found for query_id={query_id}, expected at least 9")
-                            doc_order = raw_docnos.copy()
+                        doc["docno"] = str(doc["docno"])
                     
-                    # 存到 orders 表
-                    if doc_order:
-                        doc_order_str = ",".join(str(x) for x in doc_order)
-                        c.execute("INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
-                                (user_id, query_id, doc_order_str))
-                        conn.commit()
-                        print(f"DEBUG: Inserted doc_order into orders table")
-                    else:
-                        print(f"WARNING: Empty doc_order, not inserting into orders table")
-
-                # 3. 获取文档详情
-                if doc_order:
-                    placeholders = ",".join(["%s"] * len(doc_order))
-                    sql = f"SELECT id, content, docno FROM documents WHERE qid=%s AND id IN ({placeholders})"
-                    params = [query_id] + doc_order
-                    print(f"DEBUG: Executing SQL: {sql}")
-                    c.execute(sql, params)
-                    rows = c.fetchall()
-                    print(f"DEBUG: Retrieved {len(rows)} documents")
-                    
-                    # 按 doc_order 排序
-                    doc_map = {r["id"]: r for r in rows}
-                    docs = [doc_map[d] for d in doc_order if d in doc_map]
-                    print(f"DEBUG: Final docs list has {len(docs)} documents")
-                    
-                    # 确保所有文档都有必要的字段
-                    for doc in docs:
-                        if "docno" not in doc or doc["docno"] is None:
-                            doc["docno"] = str(doc["id"])
-                        else:
-                            doc["docno"] = str(doc["docno"])
-                        
-                        if "content" not in doc or doc["content"] is None:
-                            doc["content"] = "文档内容不可用"
-                else:
-                    print(f"WARNING: Empty doc_order, no documents to retrieve")
+                    if "content" not in doc or doc["content"] is None:
+                        doc["content"] = "文档内容不可用"
         finally:
             conn.close()
     except Exception as e:
