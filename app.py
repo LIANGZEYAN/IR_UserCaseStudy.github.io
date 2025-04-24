@@ -9,6 +9,9 @@ from dbutils.pooled_db import PooledDB
 from functools import lru_cache
 import time
 from flask import g
+from threading import Thread
+import sys
+import time
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
@@ -16,6 +19,12 @@ app.secret_key = "your_secret_key"
 DEBUG_ENABLED = True 
 
 # ---------- 1. 添加全局缓存 ----------
+# 全局缓存扩展
+ALL_QUERIES = {}  # 所有查询内容 {query_id: content}
+ALL_DOCUMENTS = {}  # 所有文档内容 {(qid, doc_id): document}
+PRELOAD_COMPLETE = False  # 预加载完成标志
+PRELOAD_PROGRESS = 0  # 预加载进度（百分比）
+
 # 缓存变量 - 在全局级别定义
 QUERY_CACHE = {}  # 查询内容缓存 {query_id: content}
 DOC_ORDER_CACHE = {}  # 文档顺序缓存 {(user_id, query_id): doc_order_list}
@@ -228,8 +237,9 @@ def load_query_ids():
 def index():
     """
     首页：用户输入 user_id 并勾选 T&C。
+    登录成功后预加载所有数据。
     """
-    global AVAILABLE_QUERY_IDS
+    global AVAILABLE_QUERY_IDS, PRELOAD_COMPLETE, PRELOAD_PROGRESS
     
     # 确保查询ID列表已加载
     if not AVAILABLE_QUERY_IDS:
@@ -245,15 +255,44 @@ def index():
         
         session["user_id"] = user_id
         
-        # 如果有可用的查询ID，重定向到第一个
+        # 启动预加载线程
+        def start_preload():
+            preload_all_data(user_id)
+            
+        preload_thread = Thread(target=start_preload)
+        preload_thread.daemon = True
+        preload_thread.start()
+        
+        # 如果有可用的查询ID，重定向到加载页面
         if AVAILABLE_QUERY_IDS:
-            first_query_position = 1  # 这是位置，不是ID
-            return redirect(url_for("query_page", query_position=first_query_position))
+            return redirect(url_for("loading_page"))
         else:
             return render_template("index.html", error="No queries available in the database.")
             
     return render_template("index.html", query_count=len(AVAILABLE_QUERY_IDS))
 
+# 添加加载页面
+@app.route("/loading")
+def loading_page():
+    """显示数据加载进度，完成后自动跳转到第一个查询"""
+    if "user_id" not in session:
+        return redirect(url_for("index"))
+        
+    return render_template(
+        "loading.html", 
+        progress=PRELOAD_PROGRESS,
+        complete=PRELOAD_COMPLETE
+    )
+
+# 添加加载状态API
+@app.route("/api/loading-status")
+def loading_status():
+    """返回加载进度"""
+    return jsonify({
+        "progress": PRELOAD_PROGRESS,
+        "complete": PRELOAD_COMPLETE
+    })
+    
 # 4. 确保清理缓存函数包含日志
 def clear_old_caches():
     """定期清理过期缓存"""
@@ -304,15 +343,174 @@ def teardown_request(exception=None):
             duration = time.time() - g.start_time
             print(f"DEBUG: Request processed in {duration:.3f} seconds")
 
+# 预加载函数 - 在登录成功后调用
+def preload_all_data(user_id):
+    """预加载所有查询和文档数据到内存中"""
+    global PRELOAD_COMPLETE, PRELOAD_PROGRESS
+    
+    start_time = time.time()
+    print(f"开始为用户 {user_id} 预加载所有数据...")
+    
+    # 重置进度
+    PRELOAD_PROGRESS = 0
+    PRELOAD_COMPLETE = False
+    
+    # 1. 加载所有查询
+    load_all_queries()
+    PRELOAD_PROGRESS = 30
+    
+    # 2. 加载所有文档
+    load_all_documents()
+    PRELOAD_PROGRESS = 80
+    
+    # 3. 为当前用户生成并缓存所有文档顺序
+    generate_all_doc_orders(user_id)
+    PRELOAD_PROGRESS = 100
+    
+    # 标记预加载完成
+    PRELOAD_COMPLETE = True
+    
+    # 显示缓存统计
+    total_size = sys.getsizeof(ALL_QUERIES) + sys.getsizeof(ALL_DOCUMENTS) + sys.getsizeof(DOC_ORDER_CACHE)
+    print(f"预加载完成！用时 {time.time()-start_time:.2f} 秒")
+    print(f"缓存统计: {len(ALL_QUERIES)} 个查询, {len(ALL_DOCUMENTS)} 个文档, {len(DOC_ORDER_CACHE)} 个文档顺序")
+    print(f"估计内存使用: {total_size/1024:.2f} KB")
+    
+    return True
+
+def load_all_queries():
+    """加载所有查询到内存"""
+    global ALL_QUERIES, QUERY_CACHE
+    
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT id, content FROM queries ORDER BY id")
+            queries = c.fetchall()
+            
+            for query in queries:
+                query_id = int(query['id'])
+                ALL_QUERIES[query_id] = query['content']
+                # 同时更新普通查询缓存
+                QUERY_CACHE[query_id] = query['content']
+                
+            print(f"已加载 {len(queries)} 个查询到内存")
+    finally:
+        conn.close()
+
+def load_all_documents():
+    """加载所有文档到内存"""
+    global ALL_DOCUMENTS, DOC_CONTENT_CACHE
+    
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT id, qid, docno, content FROM documents")
+            docs = c.fetchall()
+            
+            for doc in docs:
+                doc_id = int(doc['id'])
+                qid = int(doc['qid'])
+                
+                # 确保docno是字符串
+                if doc['docno'] is None:
+                    doc['docno'] = str(doc_id)
+                else:
+                    doc['docno'] = str(doc['docno'])
+                
+                # 存储到全局文档缓存
+                cache_key = (qid, doc_id)
+                ALL_DOCUMENTS[cache_key] = doc
+                # 同时更新普通文档缓存
+                DOC_CONTENT_CACHE[cache_key] = doc
+                
+            print(f"已加载 {len(docs)} 个文档到内存")
+    finally:
+        conn.close()
+
+def generate_all_doc_orders(user_id):
+    """为当前用户生成所有查询的文档顺序"""
+    global DOC_ORDER_CACHE
+    
+    # 获取所有查询ID
+    query_ids = list(ALL_QUERIES.keys())
+    
+    # 确保user_id是字符串
+    user_id = str(user_id)
+    
+    conn = get_connection()
+    try:
+        with conn.cursor() as c:
+            # 先检查数据库中已有的顺序
+            placeholders = ','.join(['%s'] * len(query_ids))
+            c.execute(f"SELECT query_id, doc_order FROM orders WHERE user_id=%s AND query_id IN ({placeholders})",
+                      [user_id] + query_ids)
+            existing_orders = {int(row['query_id']): row['doc_order'] for row in c.fetchall()}
+            
+            # 计算行索引，用于拉丁方
+            row_index = get_user_row_index(user_id)
+            
+            # 批量插入需要的数据
+            orders_to_insert = []
+            
+            for query_id in query_ids:
+                if query_id in existing_orders:
+                    # 已存在顺序，解析并缓存
+                    doc_order_str = existing_orders[query_id]
+                    doc_order = [int(x) for x in doc_order_str.split(',')]
+                    DOC_ORDER_CACHE[(user_id, query_id)] = doc_order
+                else:
+                    # 需要生成新顺序
+                    # 获取该查询的所有文档ID
+                    query_docs = [doc_id for (qid, doc_id) in ALL_DOCUMENTS.keys() if qid == query_id]
+                    
+                    if len(query_docs) >= 9:
+                        # 使用拉丁方重排
+                        perm = LATIN_9x9[row_index]
+                        doc_order = []
+                        for i in range(9):
+                            idx = perm[i] - 1
+                            if 0 <= idx < len(query_docs):
+                                doc_order.append(query_docs[idx])
+                    else:
+                        # 文档数量不足，直接使用
+                        doc_order = query_docs
+                    
+                    # 更新缓存
+                    DOC_ORDER_CACHE[(user_id, query_id)] = doc_order
+                    
+                    # 准备数据库插入
+                    if doc_order:
+                        doc_order_str = ','.join(str(x) for x in doc_order)
+                        orders_to_insert.append((user_id, query_id, doc_order_str))
+            
+            # 批量插入新生成的顺序
+            if orders_to_insert:
+                c.executemany(
+                    "INSERT INTO orders (user_id, query_id, doc_order) VALUES (%s, %s, %s)",
+                    orders_to_insert
+                )
+                conn.commit()
+                
+            print(f"已为用户 {user_id} 生成/加载了 {len(query_ids)} 个查询的文档顺序")
+            print(f"其中 {len(orders_to_insert)} 个是新生成的")
+    finally:
+        conn.close()
+        
 # ---------- 3. 优化数据库查询函数 ----------
 def get_query_content(query_id):
-    """获取查询内容，使用缓存"""
-    # 检查缓存
+    """获取查询内容，优先使用预加载数据"""
+    # 确保query_id是整数
+    query_id = int(query_id)
+    
+    # 优先查找预加载的数据
+    if query_id in ALL_QUERIES:
+        return ALL_QUERIES[query_id]
+    
+    # 其次查找普通缓存
     if query_id in QUERY_CACHE:
-        debug_print(f"DEBUG: Cache hit for query_id={query_id}")
         return QUERY_CACHE[query_id]
     
-    debug_print(f"DEBUG: Cache miss for query_id={query_id}")
     # 缓存未命中，从数据库获取
     conn = g.db_conn
     with conn.cursor() as c:
@@ -355,29 +553,34 @@ def get_doc_order(user_id, query_id):
 
 # 3. 改进get_documents_for_query函数，确保缓存正常工作
 def get_documents_for_query(query_id, doc_order):
-    """高效获取文档内容，使用批量查询和缓存"""
+    """获取文档内容，优先使用预加载数据"""
     if not doc_order:
         return []
     
-    debug_print(f"获取文档: query_id={query_id}, doc_order长度={len(doc_order)}")
+    # 确保query_id是整数
+    query_id = int(query_id)
     
-    # 收集需要查询的文档IDs
-    uncached_ids = []
-    doc_map = {}
+    # 转换doc_order中的所有ID为整数
+    doc_order = [int(d) for d in doc_order]
     
-    # 首先检查缓存
-    cache_hits = 0
+    # 从预加载或缓存中获取文档
+    result = []
     for doc_id in doc_order:
-        cache_key = (int(query_id), int(doc_id))  # 确保使用整数类型作为键
+        # 先检查预加载数据
+        cache_key = (query_id, doc_id)
+        if cache_key in ALL_DOCUMENTS:
+            result.append(ALL_DOCUMENTS[cache_key])
+            continue
+            
+        # 再检查普通缓存
         if cache_key in DOC_CONTENT_CACHE:
-            # 从缓存获取
-            doc_map[doc_id] = DOC_CONTENT_CACHE[cache_key]
-            cache_hits += 1
-        else:
-            # 需要从数据库查询
-            uncached_ids.append(doc_id)
+            result.append(DOC_CONTENT_CACHE[cache_key])
+            continue
+            
+        # 如果都没有找到，留空（这种情况不应该发生，因为我们预加载了所有数据）
+        debug_print(f"警告: 文档 {doc_id} 在缓存中未找到！")
     
-    debug_print(f"文档缓存命中: {cache_hits}/{len(doc_order)}")
+    return result
     
     # 如果有未缓存的文档，批量查询
     if uncached_ids:
