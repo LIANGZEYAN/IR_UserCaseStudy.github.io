@@ -519,7 +519,7 @@ try:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
         # 只保留前27个查询的数据
-        unique_qids = df['qid'].unique()[-26：]
+        unique_qids = df['qid'].unique()[-26:]
         filtered_df = df[df['qid'].isin(unique_qids)]
         
         # 检查documents表是否为空
