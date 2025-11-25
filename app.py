@@ -509,7 +509,7 @@ clear_tables_before_import()
 
 try:
     # 读取CSV文件
-    df = pd.read_csv("result_interleaved_with_text.csv")
+    df = pd.read_csv("result_preference_based_with_text_gold.csv")
     
     # 检查必要的列是否存在
     required_columns = ['qid', 'query', 'docno', 'text']
@@ -518,8 +518,8 @@ try:
     if missing_columns:
         print(f"错误: CSV文件缺少以下列: {', '.join(missing_columns)}")
     else:
-        # 只保留后21个查询的数据
-        unique_qids = df['qid'].unique()[22:]
+        # 只保留前22个查询的数据
+        unique_qids = df['qid'].unique()[:22]
         filtered_df = df[df['qid'].isin(unique_qids)]
         
         # 检查documents表是否为空
@@ -540,7 +540,7 @@ try:
         # 如果表为空，执行导入
         if is_table_empty:
             import_df_to_database(filtered_df)  # 使用过滤后的DataFrame
-            print(f"成功从 result_interleaved_with_text.csv 导入后21个查询的数据")
+            print(f"成功从 result_preference_based_with_text_gold.csv 导入前22个查询的数据")
 
 except Exception as e:
     print(f"导入数据时出错: {e}")
